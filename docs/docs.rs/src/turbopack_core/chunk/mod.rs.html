@@ -510,29 +510,91 @@
 <span id="510">510</span>
 <span id="511">511</span>
 <span id="512">512</span>
-</pre><pre class="rust"><code><span class="kw">pub mod </span>dev;
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+</pre><pre class="rust"><code><span class="kw">pub mod </span>chunk_in_group;
+<span class="kw">pub mod </span>dev;
 <span class="kw">pub mod </span>optimize;
 
-<span class="kw">use </span>std::{collections::VecDeque, fmt::Debug};
+<span class="kw">use </span>std::{
+    collections::VecDeque,
+    fmt::{Debug, Display},
+};
 
 <span class="kw">use </span>anyhow::{anyhow, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>indexmap::IndexSet;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>turbo_tasks::{
     debug::ValueDebugFormat,
+    graph::{GraphTraversal, ReverseTopological, SkipDuplicates},
     primitives::{BoolVc, StringVc},
     trace::TraceRawVcs,
-    ValueToString, ValueToStringVc,
+    TryJoinIterExt, ValueToString, ValueToStringVc,
 };
 <span class="kw">use </span>turbo_tasks_fs::FileSystemPathVc;
 <span class="kw">use </span>turbo_tasks_hash::DeterministicHash;
 
-<span class="kw">use </span><span class="self">self</span>::optimize::optimize;
+<span class="kw">use </span><span class="self">self</span>::{chunk_in_group::ChunkInGroupVc, optimize::optimize};
 <span class="kw">use crate</span>::{
     asset::{Asset, AssetVc, AssetsVc},
     environment::EnvironmentVc,
     reference::{AssetReference, AssetReferenceVc, AssetReferencesVc},
-    resolve::{ResolveResult, ResolveResultVc},
+    resolve::{PrimaryResolveResult, ResolveResult, ResolveResultVc},
 };
 
 <span class="doccomment">/// A module id, which can be a number or string
@@ -542,6 +604,23 @@
 </span><span class="kw">pub enum </span>ModuleId {
     Number(u32),
     String(String),
+}
+
+<span class="kw">impl </span>Display <span class="kw">for </span>ModuleId {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="kw">match </span><span class="self">self </span>{
+            ModuleId::Number(i) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, i),
+            ModuleId::String(s) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, s),
+        }
+    }
+}
+
+<span class="attr">#[turbo_tasks::value_impl]
+</span><span class="kw">impl </span>ValueToString <span class="kw">for </span>ModuleId {
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">fn </span>to_string(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; StringVc {
+        StringVc::cell(<span class="self">self</span>.to_string())
+    }
 }
 
 <span class="kw">impl </span>ModuleId {
@@ -562,7 +641,9 @@
 </span><span class="kw">pub trait </span>ChunkingContext {
     <span class="kw">fn </span>output_root(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc;
 
-    <span class="kw">fn </span>environment(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; EnvironmentVc;
+    <span class="comment">// TODO remove this, a chunking context should not be bound to a specific
+    // environment since this can change due to transitions in the module graph
+    </span><span class="kw">fn </span>environment(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; EnvironmentVc;
 
     <span class="kw">fn </span>chunk_path(<span class="kw-2">&amp;</span><span class="self">self</span>, path: FileSystemPathVc, extension: <span class="kw-2">&amp;</span>str) -&gt; FileSystemPathVc;
 
@@ -614,32 +695,64 @@
     /// All chunks should be loaded in parallel.
     </span><span class="attr">#[turbo_tasks::function]
     </span><span class="kw">pub async fn </span>chunks(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;ChunksVc&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>chunks = IndexSet::new();
+        <span class="kw">let </span>chunks: Vec&lt;<span class="kw">_</span>&gt; = GraphTraversal::&lt;ReverseTopological&lt;<span class="kw">_</span>&gt;&gt;::visit(
+            [<span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>.entry],
+            SkipDuplicates::new(get_chunk_children),
+        )
+        .<span class="kw">await</span><span class="question-mark">?
+        </span>.into_iter()
+        .collect();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>queue = <span class="macro">vec!</span>[<span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>.entry];
-        <span class="kw">while let </span><span class="prelude-val">Some</span>(chunk) = queue.pop() {
-            <span class="kw">let </span>chunk = chunk.resolve().<span class="kw">await</span><span class="question-mark">?</span>;
-            <span class="kw">if </span>chunks.insert(chunk) {
-                <span class="kw">for </span>r <span class="kw">in </span>chunk.references().<span class="kw">await</span><span class="question-mark">?</span>.iter() {
-                    <span class="kw">if let </span><span class="prelude-val">Some</span>(pc) = ParallelChunkReferenceVc::resolve_from(r).<span class="kw">await</span><span class="question-mark">? </span>{
-                        <span class="kw">if </span><span class="kw-2">*</span>pc.is_loaded_in_parallel().<span class="kw">await</span><span class="question-mark">? </span>{
-                            <span class="kw">let </span>result = r.resolve_reference();
-                            <span class="kw">for </span>a <span class="kw">in </span>result.primary_assets().<span class="kw">await</span><span class="question-mark">?</span>.iter() {
-                                <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk) = ChunkVc::resolve_from(a).<span class="kw">await</span><span class="question-mark">? </span>{
-                                    queue.push(chunk);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        <span class="kw">let </span>chunks = ChunksVc::cell(chunks.into_iter().collect());
+        <span class="kw">let </span>chunks = ChunksVc::cell(chunks);
         <span class="kw">let </span>chunks = optimize(chunks, <span class="self">self</span>);
+        <span class="kw">let </span>chunks = ChunksVc::cell(
+            chunks
+                .<span class="kw">await</span><span class="question-mark">?
+                </span>.iter()
+                .map(|<span class="kw-2">&amp;</span>chunk| ChunkInGroupVc::new(chunk).as_chunk())
+                .collect(),
+        );
 
         <span class="prelude-val">Ok</span>(chunks)
     }
+}
+
+<span class="doccomment">/// Computes the list of all chunk children of a given chunk.
+</span><span class="kw">async fn </span>get_chunk_children(parent: ChunkVc) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">impl </span>Iterator&lt;Item = ChunkVc&gt; + Send&gt; {
+    <span class="prelude-val">Ok</span>(parent
+        .references()
+        .<span class="kw">await</span><span class="question-mark">?
+        </span>.iter()
+        .copied()
+        .map(reference_to_chunks)
+        .try_join()
+        .<span class="kw">await</span><span class="question-mark">?
+        </span>.into_iter()
+        .flatten())
+}
+
+<span class="doccomment">/// Get all parallel chunks from a parallel chunk reference.
+</span><span class="kw">async fn </span>reference_to_chunks(r: AssetReferenceVc) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">impl </span>Iterator&lt;Item = ChunkVc&gt; + Send&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::new();
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(pc) = ParallelChunkReferenceVc::resolve_from(r).<span class="kw">await</span><span class="question-mark">? </span>{
+        <span class="kw">if </span><span class="kw-2">*</span>pc.is_loaded_in_parallel().<span class="kw">await</span><span class="question-mark">? </span>{
+            result = r
+                .resolve_reference()
+                .<span class="kw">await</span><span class="question-mark">?
+                </span>.primary
+                .iter()
+                .map(|r| <span class="kw">async move </span>{
+                    <span class="prelude-val">Ok</span>(<span class="kw">if let </span>PrimaryResolveResult::Asset(a) = r {
+                        ChunkVc::resolve_from(a).<span class="kw">await</span><span class="question-mark">?
+                    </span>} <span class="kw">else </span>{
+                        <span class="prelude-val">None
+                    </span>})
+                })
+                .try_join()
+                .<span class="kw">await</span><span class="question-mark">?</span>;
+        }
+    }
+    <span class="prelude-val">Ok</span>(result.into_iter().flatten())
 }
 
 <span class="attr">#[turbo_tasks::value_impl]
@@ -739,7 +852,7 @@
 </span><span class="kw">impl </span>AssetReference <span class="kw">for </span>ChunkReference {
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">fn </span>resolve_reference(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ResolveResultVc {
-        ResolveResult::Single(<span class="self">self</span>.chunk.into(), Vec::new()).into()
+        ResolveResult::asset(<span class="self">self</span>.chunk.into()).into()
     }
 }
 
@@ -787,7 +900,7 @@
             </span>.iter()
             .map(|c| c.as_asset())
             .collect();
-        <span class="prelude-val">Ok</span>(ResolveResult::Alternatives(set, Vec::new()).into())
+        <span class="prelude-val">Ok</span>(ResolveResult::assets(set).into())
     }
 }
 
@@ -815,7 +928,7 @@
     <span class="kw">async fn </span>from_async_asset(
         context: ChunkingContextVc,
         asset: ChunkableAssetVc,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(<span class="self">Self</span>, ChunkableAssetVc)&gt;&gt;;
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;&gt;;
 }
 
 <span class="kw">pub async fn </span>chunk_content_split&lt;I: FromChunkableAsset&gt;(
@@ -838,8 +951,8 @@
 
 <span class="kw">enum </span>ChunkContentWorkItem {
     AssetReferences(AssetReferencesVc),
-    Assets {
-        assets: AssetsVc,
+    ResolveResult {
+        result: ResolveResultVc,
         reference: AssetReferenceVc,
         chunking_type: ChunkingType,
     },
@@ -882,8 +995,8 @@
                 <span class="kw">for </span>r <span class="kw">in </span>item.<span class="kw">await</span><span class="question-mark">?</span>.iter() {
                     <span class="kw">if let </span><span class="prelude-val">Some</span>(pc) = ChunkableAssetReferenceVc::resolve_from(r).<span class="kw">await</span><span class="question-mark">? </span>{
                         <span class="kw">if let </span><span class="prelude-val">Some</span>(chunking_type) = <span class="kw-2">*</span>pc.chunking_type(context).<span class="kw">await</span><span class="question-mark">? </span>{
-                            queue.push_back(ChunkContentWorkItem::Assets {
-                                assets: r.resolve_reference().primary_assets(),
+                            queue.push_back(ChunkContentWorkItem::ResolveResult {
+                                result: r.resolve_reference(),
                                 reference: <span class="kw-2">*</span>r,
                                 chunking_type,
                             });
@@ -893,8 +1006,8 @@
                     external_asset_references.push(<span class="kw-2">*</span>r);
                 }
             }
-            ChunkContentWorkItem::Assets {
-                assets,
+            ChunkContentWorkItem::ResolveResult {
+                result,
                 reference,
                 chunking_type,
             } =&gt; {
@@ -913,13 +1026,16 @@
                 // not loaded in parallel
                 </span><span class="kw">let </span><span class="kw-2">mut </span>inner_chunk_groups = Vec::new();
 
-                <span class="kw">for </span>asset <span class="kw">in </span>assets
-                    .<span class="kw">await</span><span class="question-mark">?
-                    </span>.iter()
-                    .filter(|asset| processed_assets.insert((chunking_type, <span class="kw-2">**</span>asset)))
-                {
-                    <span class="kw">let </span>asset: <span class="kw-2">&amp;</span>AssetVc = asset;
-
+                <span class="kw">let </span>result = result.<span class="kw">await</span><span class="question-mark">?</span>;
+                <span class="kw">let </span>assets = result.primary.iter().filter_map(|result| {
+                    <span class="kw">if let </span>PrimaryResolveResult::Asset(asset) = <span class="kw-2">*</span>result {
+                        <span class="kw">if </span>processed_assets.insert((chunking_type, asset)) {
+                            <span class="kw">return </span><span class="prelude-val">Some</span>(asset);
+                        }
+                    }
+                    <span class="prelude-val">None
+                </span>});
+                <span class="kw">for </span>asset <span class="kw">in </span>assets {
                     <span class="kw">let </span>chunkable_asset = <span class="kw">match </span>ChunkableAssetVc::resolve_from(asset).<span class="kw">await</span><span class="question-mark">? </span>{
                         <span class="prelude-val">Some</span>(chunkable_asset) =&gt; chunkable_asset,
                         <span class="kw">_ </span>=&gt; {
@@ -930,7 +1046,7 @@
 
                     <span class="kw">match </span>chunking_type {
                         ChunkingType::Placed =&gt; {
-                            <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_item) = I::from_asset(context, <span class="kw-2">*</span>asset).<span class="kw">await</span><span class="question-mark">? </span>{
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_item) = I::from_asset(context, asset).<span class="kw">await</span><span class="question-mark">? </span>{
                                 inner_chunk_items.push(chunk_item);
                             } <span class="kw">else </span>{
                                 <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
@@ -946,9 +1062,9 @@
                         }
                         ChunkingType::PlacedOrParallel =&gt; {
                             <span class="comment">// heuristic for being in the same chunk
-                            </span><span class="kw">if </span>!split &amp;&amp; <span class="kw-2">*</span>context.can_be_in_same_chunk(entry, <span class="kw-2">*</span>asset).<span class="kw">await</span><span class="question-mark">? </span>{
+                            </span><span class="kw">if </span>!split &amp;&amp; <span class="kw-2">*</span>context.can_be_in_same_chunk(entry, asset).<span class="kw">await</span><span class="question-mark">? </span>{
                                 <span class="comment">// chunk item, chunk or other asset?
-                                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_item) = I::from_asset(context, <span class="kw-2">*</span>asset).<span class="kw">await</span><span class="question-mark">? </span>{
+                                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_item) = I::from_asset(context, asset).<span class="kw">await</span><span class="question-mark">? </span>{
                                     inner_chunk_items.push(chunk_item);
                                     <span class="kw">continue</span>;
                                 }
@@ -962,12 +1078,10 @@
                                 .push(ChunkGroupVc::from_asset(chunkable_asset, context));
                         }
                         ChunkingType::SeparateAsync =&gt; {
-                            <span class="kw">if let </span><span class="prelude-val">Some</span>((manifest_loader_item, manifest_chunk)) =
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_item) =
                                 I::from_async_asset(context, chunkable_asset).<span class="kw">await</span><span class="question-mark">?
                             </span>{
-                                inner_chunk_items.push(manifest_loader_item);
-                                inner_chunk_groups
-                                    .push(ChunkGroupVc::from_asset(manifest_chunk, context));
+                                inner_chunk_items.push(chunk_item);
                             } <span class="kw">else </span>{
                                 external_asset_references.push(reference);
                                 <span class="kw">continue </span><span class="lifetime">&#39;outer</span>;

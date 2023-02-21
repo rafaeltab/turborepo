@@ -139,11 +139,16 @@
 <span id="139">139</span>
 <span id="140">140</span>
 <span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::fmt::Write <span class="kw">as _</span>;
 
 <span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>turbo_tasks::{primitives::StringVc, ValueToString, ValueToStringVc};
-<span class="kw">use </span>turbo_tasks_env::ProcessEnvVc;
+<span class="kw">use </span>turbo_tasks_env::{ProcessEnv, ProcessEnvVc};
 <span class="kw">use </span>turbo_tasks_fs::FileSystemPathVc;
 <span class="kw">use </span>turbopack_core::{
     asset::{Asset, AssetContentVc, AssetVc},
@@ -156,7 +161,7 @@
         EcmascriptChunkItemVc, EcmascriptChunkPlaceable, EcmascriptChunkPlaceableVc,
         EcmascriptChunkVc, EcmascriptExports, EcmascriptExportsVc,
     },
-    utils::stringify_str,
+    utils::stringify_js,
 };
 
 <span class="doccomment">/// The `process.env` asset, responsible for initializing the env (shared by all
@@ -255,6 +260,11 @@
     }
 
     <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">fn </span>related_path(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc {
+        <span class="self">self</span>.inner.path()
+    }
+
+    <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">async fn </span>content(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;EcmascriptChunkItemContentVc&gt; {
         <span class="kw">let </span>asset = <span class="self">self</span>.inner.<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span>env = asset.env.read_all().<span class="kw">await</span><span class="question-mark">?</span>;
@@ -270,7 +280,7 @@
             // env can be used to inject live code into the output.
             // TODO this is not completely correct as env vars need to ignore casing
             // So `process.env.path === process.env.PATH === process.env.PaTh`
-            </span><span class="macro">writeln!</span>(code, <span class="string">&quot;env[{}] = {};&quot;</span>, stringify_str(name), val)<span class="question-mark">?</span>;
+            </span><span class="macro">writeln!</span>(code, <span class="string">&quot;env[{}] = {};&quot;</span>, stringify_js(name), val)<span class="question-mark">?</span>;
         }
 
         <span class="prelude-val">Ok</span>(EcmascriptChunkItemContent {

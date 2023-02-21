@@ -489,6 +489,117 @@
 <span id="489">489</span>
 <span id="490">490</span>
 <span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
 </pre><pre class="rust"><code><span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>indexmap::IndexMap;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -499,12 +610,14 @@
     Value,
 };
 <span class="kw">use </span>turbo_tasks_env::EnvMapVc;
+<span class="kw">use </span>turbo_tasks_fs::json::parse_json_rope_with_source_context;
 <span class="kw">use </span>turbopack::{
     evaluate_context::node_evaluate_asset_context,
     module_options::{WebpackLoadersOptions, WebpackLoadersOptionsVc},
 };
 <span class="kw">use </span>turbopack_core::{
     asset::Asset,
+    context::AssetContext,
     reference_type::{EntryReferenceSubType, ReferenceType},
     resolve::{
         find_context_file,
@@ -520,6 +633,7 @@
 <span class="kw">use </span>turbopack_node::{
     evaluate::{evaluate, JavaScriptValue},
     execution_context::{ExecutionContext, ExecutionContextVc},
+    transforms::webpack::{WebpackLoaderConfigs, WebpackLoaderConfigsVc},
 };
 
 <span class="kw">use </span><span class="kw">crate</span>::embed_js::next_asset;
@@ -528,19 +642,21 @@
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
 </span><span class="kw">pub struct </span>NextConfig {
-    <span class="kw">pub </span>cross_origin: <span class="prelude-ty">Option</span>&lt;String&gt;,
     <span class="kw">pub </span>config_file: <span class="prelude-ty">Option</span>&lt;String&gt;,
     <span class="kw">pub </span>config_file_name: String,
 
-    <span class="kw">pub </span>react_strict_mode: <span class="prelude-ty">Option</span>&lt;bool&gt;,
-    <span class="kw">pub </span>experimental: ExperimentalConfig,
     <span class="kw">pub </span>env: IndexMap&lt;String, String&gt;,
-    <span class="kw">pub </span>compiler: <span class="prelude-ty">Option</span>&lt;CompilerConfig&gt;,
+    <span class="kw">pub </span>experimental: ExperimentalConfig,
     <span class="kw">pub </span>images: ImageConfig,
+    <span class="kw">pub </span>page_extensions: Vec&lt;String&gt;,
+    <span class="kw">pub </span>react_strict_mode: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+    <span class="kw">pub </span>rewrites: Rewrites,
     <span class="kw">pub </span>transpile_packages: <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt;,
 
     <span class="comment">// unsupported
-    </span>amp: AmpConfig,
+    </span>cross_origin: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    compiler: <span class="prelude-ty">Option</span>&lt;CompilerConfig&gt;,
+    amp: AmpConfig,
     analytics_id: String,
     asset_prefix: String,
     base_path: String,
@@ -555,22 +671,17 @@
     <span class="comment">// this is a function in js land
     </span>generate_build_id: <span class="prelude-ty">Option</span>&lt;serde_json::Value&gt;,
     generate_etags: bool,
-    <span class="comment">// this is a function in js land
-    </span>headers: <span class="prelude-ty">Option</span>&lt;serde_json::Value&gt;,
+    headers: Vec&lt;Header&gt;,
     http_agent_options: HttpAgentConfig,
     i18n: <span class="prelude-ty">Option</span>&lt;I18NConfig&gt;,
     on_demand_entries: OnDemandEntriesConfig,
     optimize_fonts: bool,
     output: <span class="prelude-ty">Option</span>&lt;OutputType&gt;,
     output_file_tracing: bool,
-    page_extensions: Vec&lt;String&gt;,
     powered_by_header: bool,
     production_browser_source_maps: bool,
     public_runtime_config: IndexMap&lt;String, serde_json::Value&gt;,
-    <span class="comment">// this is a function in js land
-    </span>redirects: <span class="prelude-ty">Option</span>&lt;serde_json::Value&gt;,
-    <span class="comment">// this is a function in js land
-    </span>rewrites: <span class="prelude-ty">Option</span>&lt;serde_json::Value&gt;,
+    redirects: Vec&lt;Redirect&gt;,
     sass_options: IndexMap&lt;String, serde_json::Value&gt;,
     server_runtime_config: IndexMap&lt;String, serde_json::Value&gt;,
     static_page_generation_timeout: f64,
@@ -647,6 +758,100 @@
 #[serde(rename_all = <span class="string">&quot;kebab-case&quot;</span>)]
 </span><span class="kw">enum </span>OutputType {
     Standalone,
+}
+
+<span class="attr">#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[serde(tag = <span class="string">&quot;type&quot;</span>, rename_all = <span class="string">&quot;kebab-case&quot;</span>)]
+</span><span class="kw">pub enum </span>RouteHas {
+    Header {
+        key: String,
+        <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+        </span>value: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    },
+    Cookie {
+        key: String,
+        <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+        </span>value: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    },
+    Query {
+        key: String,
+        <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+        </span>value: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    },
+    Host {
+        value: String,
+    },
+}
+
+<span class="attr">#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub struct </span>HeaderValue {
+    <span class="kw">pub </span>key: String,
+    <span class="kw">pub </span>value: String,
+}
+
+<span class="attr">#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub struct </span>Header {
+    <span class="kw">pub </span>source: String,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>base_path: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>locale: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+    <span class="kw">pub </span>headers: Vec&lt;HeaderValue&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>has: <span class="prelude-ty">Option</span>&lt;Vec&lt;RouteHas&gt;&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>missing: <span class="prelude-ty">Option</span>&lt;Vec&lt;RouteHas&gt;&gt;,
+}
+
+<span class="attr">#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub enum </span>RedirectStatus {
+    StatusCode(f64),
+    Permanent(bool),
+}
+
+<span class="attr">#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub struct </span>Redirect {
+    <span class="kw">pub </span>source: String,
+    <span class="kw">pub </span>destination: String,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>base_path: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>locale: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>has: <span class="prelude-ty">Option</span>&lt;Vec&lt;RouteHas&gt;&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>missing: <span class="prelude-ty">Option</span>&lt;Vec&lt;RouteHas&gt;&gt;,
+
+    <span class="attr">#[serde(flatten)]
+    </span><span class="kw">pub </span>status: RedirectStatus,
+}
+
+<span class="attr">#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub struct </span>Rewrite {
+    <span class="kw">pub </span>source: String,
+    <span class="kw">pub </span>destination: String,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>base_path: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>locale: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>has: <span class="prelude-ty">Option</span>&lt;Vec&lt;RouteHas&gt;&gt;,
+    <span class="attr">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>)]
+    </span><span class="kw">pub </span>missing: <span class="prelude-ty">Option</span>&lt;Vec&lt;RouteHas&gt;&gt;,
+}
+
+<span class="attr">#[turbo_tasks::value(eq = <span class="string">&quot;manual&quot;</span>)]
+#[derive(Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub struct </span>Rewrites {
+    <span class="kw">pub </span>before_files: Vec&lt;Rewrite&gt;,
+    <span class="kw">pub </span>after_files: Vec&lt;Rewrite&gt;,
+    <span class="kw">pub </span>fallback: Vec&lt;Rewrite&gt;,
 }
 
 <span class="attr">#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TraceRawVcs)]
@@ -732,11 +937,17 @@
 
 <span class="attr">#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TraceRawVcs)]
 #[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub struct </span>ExperimentalTurboConfig {
+    <span class="kw">pub </span>loaders: <span class="prelude-ty">Option</span>&lt;IndexMap&lt;String, WebpackLoaderConfigs&gt;&gt;,
+    <span class="kw">pub </span>resolve_alias: <span class="prelude-ty">Option</span>&lt;IndexMap&lt;String, JsonValue&gt;&gt;,
+}
+
+<span class="attr">#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TraceRawVcs)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
 </span><span class="kw">pub struct </span>ExperimentalConfig {
     <span class="kw">pub </span>app_dir: <span class="prelude-ty">Option</span>&lt;bool&gt;,
-    <span class="kw">pub </span>resolve_alias: <span class="prelude-ty">Option</span>&lt;IndexMap&lt;String, JsonValue&gt;&gt;,
     <span class="kw">pub </span>server_components_external_packages: <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt;,
-    <span class="kw">pub </span>turbopack_loaders: <span class="prelude-ty">Option</span>&lt;IndexMap&lt;String, Vec&lt;String&gt;&gt;&gt;,
+    <span class="kw">pub </span>turbo: <span class="prelude-ty">Option</span>&lt;ExperimentalTurboConfig&gt;,
 
     <span class="comment">// unsupported
     </span>adjust_font_fallbacks: <span class="prelude-ty">Option</span>&lt;bool&gt;,
@@ -874,6 +1085,16 @@
     }
 
     <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">pub async fn </span>page_extensions(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;StringsVc&gt; {
+        <span class="prelude-val">Ok</span>(StringsVc::cell(<span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>.page_extensions.clone()))
+    }
+
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">pub async fn </span>rewrites(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;RewritesVc&gt; {
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>.rewrites.clone().cell())
+    }
+
+    <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">pub async fn </span>transpile_packages(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;StringsVc&gt; {
         <span class="prelude-val">Ok</span>(StringsVc::cell(
             <span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>.transpile_packages.clone().unwrap_or_default(),
@@ -882,12 +1103,13 @@
 
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">pub async fn </span>webpack_loaders_options(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;WebpackLoadersOptionsVc&gt; {
-        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>turbopack_loaders) = <span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>.experimental.turbopack_loaders <span class="kw">else </span>{
+        <span class="kw">let </span>this = <span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="prelude-val">Some</span>(turbo_loaders) = this.experimental.turbo.as_ref().and_then(|t| t.loaders.as_ref()) <span class="kw">else </span>{
             <span class="kw">return </span><span class="prelude-val">Ok</span>(WebpackLoadersOptionsVc::cell(WebpackLoadersOptions::default()));
         };
         <span class="kw">let </span><span class="kw-2">mut </span>extension_to_loaders = IndexMap::new();
-        <span class="kw">for </span>(ext, loaders) <span class="kw">in </span>turbopack_loaders {
-            extension_to_loaders.insert(ext.clone(), StringsVc::cell(loaders.clone()));
+        <span class="kw">for </span>(ext, loaders) <span class="kw">in </span>turbo_loaders {
+            extension_to_loaders.insert(ext.clone(), WebpackLoaderConfigsVc::cell(loaders.clone()));
         }
         <span class="prelude-val">Ok</span>(WebpackLoadersOptions {
             extension_to_loaders,
@@ -899,7 +1121,7 @@
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">pub async fn </span>resolve_alias_options(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;ResolveAliasMapVc&gt; {
         <span class="kw">let </span>this = <span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>;
-        <span class="kw">let </span><span class="prelude-val">Some</span>(resolve_alias) = this.experimental.resolve_alias.as_ref() <span class="kw">else </span>{
+        <span class="kw">let </span><span class="prelude-val">Some</span>(resolve_alias) = this.experimental.turbo.as_ref().and_then(|t| t.resolve_alias.as_ref()) <span class="kw">else </span>{
             <span class="kw">return </span><span class="prelude-val">Ok</span>(ResolveAliasMapVc::cell(ResolveAliasMap::default()));
         };
         <span class="kw">let </span>alias_map: ResolveAliasMap = resolve_alias.try_into()<span class="question-mark">?</span>;
@@ -929,7 +1151,7 @@
     import_map.insert_exact_alias(<span class="string">&quot;styled-jsx&quot;</span>, ImportMapping::External(<span class="prelude-val">None</span>).into());
     import_map.insert_wildcard_alias(<span class="string">&quot;styled-jsx/&quot;</span>, ImportMapping::External(<span class="prelude-val">None</span>).into());
 
-    <span class="kw">let </span>context = node_evaluate_asset_context(<span class="prelude-val">Some</span>(import_map.cell()));
+    <span class="kw">let </span>context = node_evaluate_asset_context(<span class="prelude-val">Some</span>(import_map.cell()), <span class="prelude-val">None</span>);
     <span class="kw">let </span>find_config_result = find_context_file(project_root, next_configs());
     <span class="kw">let </span>config_asset = <span class="kw">match </span><span class="kw-2">&amp;*</span>find_config_result.<span class="kw">await</span><span class="question-mark">? </span>{
         FindContextFileResult::Found(config_path, <span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(SourceAssetVc::new(<span class="kw-2">*</span>config_path)),
@@ -943,7 +1165,7 @@
             context,
             Value::new(EcmascriptModuleAssetType::Ecmascript),
             EcmascriptInputTransformsVc::cell(<span class="macro">vec!</span>[]),
-            context.environment(),
+            context.compile_time_info(),
         )
         .as_ecmascript_chunk_placeable();
         EcmascriptChunkPlaceablesVc::cell(<span class="macro">vec!</span>[config_chunk])
@@ -969,7 +1191,7 @@
     .<span class="kw">await</span><span class="question-mark">?</span>;
     <span class="kw">match </span><span class="kw-2">&amp;*</span>config_value {
         JavaScriptValue::Value(val) =&gt; {
-            <span class="kw">let </span>next_config: NextConfig = serde_json::from_reader(val.read())<span class="question-mark">?</span>;
+            <span class="kw">let </span>next_config: NextConfig = parse_json_rope_with_source_context(val)<span class="question-mark">?</span>;
             <span class="kw">let </span>next_config = next_config.cell();
 
             <span class="prelude-val">Ok</span>(next_config)

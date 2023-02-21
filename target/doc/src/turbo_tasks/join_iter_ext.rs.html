@@ -138,6 +138,16 @@
     }
 }
 
+<span class="kw">pub trait </span>JoinIterExt&lt;T, F&gt;: Iterator
+<span class="kw">where
+    </span>T: Unpin,
+    F: Future&lt;Output = T&gt;,
+{
+    <span class="doccomment">/// Returns a future that resolves to a vector of the outputs of the futures
+    /// in the iterator.
+    </span><span class="kw">fn </span>join(<span class="self">self</span>) -&gt; Join&lt;F&gt;;
+}
+
 <span class="doccomment">/// Future for the [TryJoinIterExt::try_join] method.
 </span><span class="kw">pub struct </span>TryJoin&lt;F&gt;
 <span class="kw">where
@@ -164,16 +174,6 @@
             std::task::Poll::Pending =&gt; std::task::Poll::Pending,
         }
     }
-}
-
-<span class="kw">pub trait </span>JoinIterExt&lt;T, F&gt;: Iterator
-<span class="kw">where
-    </span>T: Unpin,
-    F: Future&lt;Output = T&gt;,
-{
-    <span class="doccomment">/// Returns a future that resolves to a vector of the outputs of the futures
-    /// in the iterator.
-    </span><span class="kw">fn </span>join(<span class="self">self</span>) -&gt; Join&lt;F&gt;;
 }
 
 <span class="kw">pub trait </span>TryJoinIterExt&lt;T, F&gt;: Iterator

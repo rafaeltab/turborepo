@@ -1267,6 +1267,50 @@
 <span id="1267">1267</span>
 <span id="1268">1268</span>
 <span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
+<span id="1280">1280</span>
+<span id="1281">1281</span>
+<span id="1282">1282</span>
+<span id="1283">1283</span>
+<span id="1284">1284</span>
+<span id="1285">1285</span>
+<span id="1286">1286</span>
+<span id="1287">1287</span>
+<span id="1288">1288</span>
+<span id="1289">1289</span>
+<span id="1290">1290</span>
+<span id="1291">1291</span>
+<span id="1292">1292</span>
+<span id="1293">1293</span>
+<span id="1294">1294</span>
+<span id="1295">1295</span>
+<span id="1296">1296</span>
+<span id="1297">1297</span>
+<span id="1298">1298</span>
+<span id="1299">1299</span>
+<span id="1300">1300</span>
+<span id="1301">1301</span>
+<span id="1302">1302</span>
+<span id="1303">1303</span>
+<span id="1304">1304</span>
+<span id="1305">1305</span>
+<span id="1306">1306</span>
+<span id="1307">1307</span>
+<span id="1308">1308</span>
+<span id="1309">1309</span>
+<span id="1310">1310</span>
+<span id="1311">1311</span>
+<span id="1312">1312</span>
+<span id="1313">1313</span>
 </pre><pre class="rust"><code><span class="kw">pub mod </span>loader;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>optimize;
 <span class="kw">pub mod </span>source_map;
@@ -1285,15 +1329,16 @@
 <span class="kw">use </span>turbo_tasks_fs::{
     embed_file, rope::Rope, File, FileContent, FileSystemPathOptionVc, FileSystemPathVc,
 };
-<span class="kw">use </span>turbo_tasks_hash::{encode_hex, hash_xxh3_hash64, Xxh3Hash64Hasher};
+<span class="kw">use </span>turbo_tasks_hash::{encode_hex, hash_xxh3_hash64, DeterministicHasher, Xxh3Hash64Hasher};
 <span class="kw">use </span>turbopack_core::{
     asset::{Asset, AssetContentVc, AssetVc},
     chunk::{
         chunk_content, chunk_content_split,
+        chunk_in_group::ChunkInGroupVc,
         optimize::{ChunkOptimizerVc, OptimizableChunk, OptimizableChunkVc},
         Chunk, ChunkContentResult, ChunkGroupReferenceVc, ChunkGroupVc, ChunkItem, ChunkItemVc,
-        ChunkReferenceVc, ChunkVc, ChunkableAsset, ChunkableAssetVc, ChunkingContextVc,
-        FromChunkableAsset, ModuleId, ModuleIdReadRef, ModuleIdVc, ModuleIdsVc,
+        ChunkReferenceVc, ChunkVc, ChunkableAsset, ChunkableAssetVc, ChunkingContext,
+        ChunkingContextVc, FromChunkableAsset, ModuleId, ModuleIdReadRef, ModuleIdVc, ModuleIdsVc,
     },
     code_builder::{Code, CodeBuilder, CodeReadRef, CodeVc},
     environment::{ChunkLoading, EnvironmentVc},
@@ -1301,6 +1346,7 @@
         asset::{children_from_asset_references, content_to_details, IntrospectableAssetVc},
         Introspectable, IntrospectableChildrenVc, IntrospectableVc,
     },
+    issue::{code_gen::CodeGenerationIssue, IssueSeverity},
     reference::{AssetReferenceVc, AssetReferencesVc},
     source_map::{GenerateSourceMap, GenerateSourceMapVc, OptionSourceMapVc, SourceMapVc},
     version::{
@@ -1317,7 +1363,7 @@
 <span class="kw">use crate</span>::{
     parse::ParseResultSourceMapVc,
     references::esm::EsmExportsVc,
-    utils::{stringify_module_id, stringify_str, FormatIter},
+    utils::{stringify_js, FormatIter},
 };
 
 <span class="attr">#[turbo_tasks::value]
@@ -1395,6 +1441,7 @@
             </span>.resolve()
             .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">for </span>path <span class="kw">in </span>paths {
+            <span class="kw">let </span>path = path.resolve().<span class="kw">await</span><span class="question-mark">?</span>;
             <span class="kw">while </span>!<span class="kw-2">*</span>path.is_inside_or_equal(current).<span class="kw">await</span><span class="question-mark">? </span>{
                 <span class="kw">let </span>parent = current.parent().resolve().<span class="kw">await</span><span class="question-mark">?</span>;
                 <span class="kw">if </span>parent == current {
@@ -1480,11 +1527,15 @@
         <span class="kw">let </span><span class="kw-2">mut </span>chunks_server_paths = Vec::new();
         <span class="kw">let </span>output_root = context.output_root().<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">for </span>chunk <span class="kw">in </span>evaluate_chunks.iter() {
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(ecma_chunk) = EcmascriptChunkVc::resolve_from(chunk).<span class="kw">await</span><span class="question-mark">? </span>{
-                <span class="kw">if </span>ecma_chunk != origin_chunk {
-                    <span class="kw">let </span>chunk_path = <span class="kw-2">&amp;*</span>chunk.path().<span class="kw">await</span><span class="question-mark">?</span>;
-                    <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_server_path) = output_root.get_path_to(chunk_path) {
-                        chunks_server_paths.push(chunk_server_path.to_string());
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_in_group) = ChunkInGroupVc::resolve_from(chunk).<span class="kw">await</span><span class="question-mark">? </span>{
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(ecma_chunk) =
+                    EcmascriptChunkVc::resolve_from(chunk_in_group.inner()).<span class="kw">await</span><span class="question-mark">?
+                </span>{
+                    <span class="kw">if </span>ecma_chunk != origin_chunk {
+                        <span class="kw">let </span>chunk_path = <span class="kw-2">&amp;*</span>chunk.path().<span class="kw">await</span><span class="question-mark">?</span>;
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_server_path) = output_root.get_path_to(chunk_path) {
+                            chunks_server_paths.push(chunk_server_path.to_string());
+                        }
                     }
                 }
             }
@@ -1758,7 +1809,32 @@
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">async fn </span>new(chunk_item: EcmascriptChunkItemVc) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span>content = chunk_item.content();
-        <span class="kw">let </span>factory = module_factory(content);
+        <span class="kw">let </span>factory = <span class="kw">match </span>module_factory(content).resolve().<span class="kw">await </span>{
+            <span class="prelude-val">Ok</span>(factory) =&gt; factory,
+            <span class="prelude-val">Err</span>(error) =&gt; {
+                <span class="kw">let </span>id = chunk_item.id().to_string().<span class="kw">await</span>;
+                <span class="kw">let </span>id = id.as_ref().map_or_else(|<span class="kw">_</span>| <span class="string">&quot;unknown&quot;</span>, |id| <span class="kw-2">&amp;**</span>id);
+                <span class="kw">let </span><span class="kw-2">mut </span>error_message =
+                    <span class="macro">format!</span>(<span class="string">&quot;An error occurred while generating the chunk item {}&quot;</span>, id);
+                <span class="kw">for </span>err <span class="kw">in </span>error.chain() {
+                    <span class="macro">write!</span>(error_message, <span class="string">&quot;\n  at {}&quot;</span>, err)<span class="question-mark">?</span>;
+                }
+                <span class="kw">let </span>js_error_message = serde_json::to_string(<span class="kw-2">&amp;</span>error_message)<span class="question-mark">?</span>;
+                <span class="kw">let </span>issue = CodeGenerationIssue {
+                    severity: IssueSeverity::Error.cell(),
+                    path: chunk_item.related_path(),
+                    title: StringVc::cell(<span class="string">&quot;Code generation for chunk item errored&quot;</span>.to_string()),
+                    message: StringVc::cell(error_message),
+                }
+                .cell();
+                issue.as_issue().emit();
+                <span class="kw">let </span><span class="kw-2">mut </span>code = CodeBuilder::default();
+                code += <span class="string">&quot;(() =&gt; {{\n\n&quot;</span>;
+                <span class="macro">writeln!</span>(code, <span class="string">&quot;throw new Error({error});&quot;</span>, error = <span class="kw-2">&amp;</span>js_error_message)<span class="question-mark">?</span>;
+                code += <span class="string">&quot;\n}})&quot;</span>;
+                code.build().cell()
+            }
+        };
         <span class="kw">let </span>id = chunk_item.id().<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span>code = factory.<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span>hash = hash_xxh3_hash64(code.source_code());
@@ -1855,9 +1931,9 @@
         <span class="kw">let </span><span class="kw-2">mut </span>code = CodeBuilder::default();
         code += <span class="string">&quot;(self.TURBOPACK = self.TURBOPACK || []).push([&quot;</span>;
 
-        <span class="macro">writeln!</span>(code, <span class="string">&quot;{}, {{&quot;</span>, stringify_str(chunk_server_path))<span class="question-mark">?</span>;
+        <span class="macro">writeln!</span>(code, <span class="string">&quot;{}, {{&quot;</span>, stringify_js(chunk_server_path))<span class="question-mark">?</span>;
         <span class="kw">for </span>entry <span class="kw">in </span><span class="kw-2">&amp;</span>this.module_factories {
-            <span class="macro">write!</span>(code, <span class="string">&quot;\n{}: &quot;</span>, <span class="kw-2">&amp;</span>stringify_module_id(entry.id()))<span class="question-mark">?</span>;
+            <span class="macro">write!</span>(code, <span class="string">&quot;\n{}: &quot;</span>, <span class="kw-2">&amp;</span>stringify_js(entry.id()))<span class="question-mark">?</span>;
             code.push_code(entry.code());
             code += <span class="string">&quot;,&quot;</span>;
         }
@@ -1869,7 +1945,7 @@
                 .chunks_server_paths
                 .<span class="kw">await</span><span class="question-mark">?
                 </span>.iter()
-                .map(|path| <span class="macro">format!</span>(<span class="string">&quot; &amp;&amp; loadedChunks.has({})&quot;</span>, stringify_str(path)))
+                .map(|path| <span class="macro">format!</span>(<span class="string">&quot; &amp;&amp; loadedChunks.has({})&quot;</span>, stringify_js(path)))
                 .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
                 .join(<span class="string">&quot;&quot;</span>);
             <span class="kw">let </span>entries_ids = <span class="kw-2">&amp;*</span>evaluate.entry_modules_ids.<span class="kw">await</span><span class="question-mark">?</span>;
@@ -1877,7 +1953,7 @@
                 .iter()
                 .map(|id| <span class="kw">async move </span>{
                     <span class="kw">let </span>id = id.<span class="kw">await</span><span class="question-mark">?</span>;
-                    <span class="kw">let </span>id = stringify_module_id(<span class="kw-2">&amp;</span>id);
+                    <span class="kw">let </span>id = stringify_js(<span class="kw-2">&amp;</span>id);
                     <span class="prelude-val">Ok</span>(<span class="macro">format!</span>(<span class="string">r#&quot;instantiateRuntimeModule({id});&quot;#</span>)) <span class="kw">as </span><span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>&gt;
                 })
                 .try_join()
@@ -1914,7 +1990,7 @@
             &quot;# </span>};
 
             <span class="kw">let </span>specific_runtime_code = <span class="kw">match </span><span class="kw-2">*</span>this.environment.chunk_loading().<span class="kw">await</span><span class="question-mark">? </span>{
-                ChunkLoading::None =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(<span class="string">&quot;unsupported environment&quot;</span>)),
+                ChunkLoading::None =&gt; <span class="macro">embed_file!</span>(<span class="string">&quot;js/src/runtime.none.js&quot;</span>).<span class="kw">await</span><span class="question-mark">?</span>,
                 ChunkLoading::NodeJs =&gt; <span class="macro">embed_file!</span>(<span class="string">&quot;js/src/runtime.nodejs.js&quot;</span>).<span class="kw">await</span><span class="question-mark">?</span>,
                 ChunkLoading::Dom =&gt; <span class="macro">embed_file!</span>(<span class="string">&quot;js/src/runtime.dom.js&quot;</span>).<span class="kw">await</span><span class="question-mark">?</span>,
             };
@@ -2237,11 +2313,15 @@
         <span class="comment">// evalute only contributes to the hashed info
         </span><span class="kw">if let </span><span class="prelude-val">Some</span>(evaluate) = this.evaluate {
             <span class="kw">let </span>evaluate = evaluate.content(this.context, self_vc).<span class="kw">await</span><span class="question-mark">?</span>;
-            <span class="kw">for </span>path <span class="kw">in </span>evaluate.chunks_server_paths.<span class="kw">await</span><span class="question-mark">?</span>.iter() {
+            <span class="kw">let </span>chunks_server_paths = evaluate.chunks_server_paths.<span class="kw">await</span><span class="question-mark">?</span>;
+            hasher.write_usize(chunks_server_paths.len());
+            <span class="kw">for </span>path <span class="kw">in </span>chunks_server_paths.iter() {
                 hasher.write_ref(path);
                 need_hash = <span class="bool-val">true</span>;
             }
-            <span class="kw">for </span>id <span class="kw">in </span>evaluate.entry_modules_ids.<span class="kw">await</span><span class="question-mark">?</span>.iter() {
+            <span class="kw">let </span>entry_modules_ids = evaluate.entry_modules_ids.<span class="kw">await</span><span class="question-mark">?</span>;
+            hasher.write_usize(entry_modules_ids.len());
+            <span class="kw">for </span>id <span class="kw">in </span>entry_modules_ids.iter() {
                 hasher.write_value(id.<span class="kw">await</span><span class="question-mark">?</span>);
                 need_hash = <span class="bool-val">true</span>;
             }
@@ -2254,6 +2334,7 @@
             <span class="kw">let </span>main_entry = main_entries.iter().next().unwrap();
             main_entry.path()
         } <span class="kw">else </span>{
+            hasher.write_usize(main_entries.len());
             <span class="kw">for </span>entry <span class="kw">in </span><span class="kw-2">&amp;</span>main_entries {
                 <span class="kw">let </span>path = entry.path().to_string().<span class="kw">await</span><span class="question-mark">?</span>;
                 hasher.write_value(path);
@@ -2269,6 +2350,15 @@
                 main_entry.path()
             }
         };
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(omit_entries) = this.omit_entries {
+            <span class="kw">let </span>omit_entries = omit_entries.<span class="kw">await</span><span class="question-mark">?</span>;
+            hasher.write_usize(omit_entries.len());
+            <span class="kw">for </span>omit_entry <span class="kw">in </span><span class="kw-2">&amp;</span>omit_entries {
+                <span class="kw">let </span>path = omit_entry.path().to_string().<span class="kw">await</span><span class="question-mark">?</span>;
+                hasher.write_value(path);
+            }
+            need_hash = <span class="bool-val">true</span>;
+        }
 
         <span class="kw">if </span>need_hash {
             <span class="kw">let </span>hash = hasher.finish();
@@ -2450,6 +2540,7 @@
 
 <span class="attr">#[turbo_tasks::value_trait]
 </span><span class="kw">pub trait </span>EcmascriptChunkItem: ChunkItem + ValueToString {
+    <span class="kw">fn </span>related_path(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc;
     <span class="kw">fn </span>content(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; EcmascriptChunkItemContentVc;
     <span class="kw">fn </span>chunking_context(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ChunkingContextVc;
     <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ModuleIdVc {
@@ -2469,12 +2560,9 @@
     <span class="kw">async fn </span>from_async_asset(
         context: ChunkingContextVc,
         asset: ChunkableAssetVc,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(<span class="self">Self</span>, ChunkableAssetVc)&gt;&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;&gt; {
         <span class="kw">let </span>chunk = ManifestChunkAssetVc::new(asset, context);
-        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((
-            ManifestLoaderItemVc::new(context, chunk).into(),
-            chunk.into(),
-        )))
+        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(ManifestLoaderItemVc::new(context, chunk).into()))
     }
 }
 

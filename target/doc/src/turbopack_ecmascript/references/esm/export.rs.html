@@ -280,7 +280,7 @@
 
 <span class="kw">use super</span>::{base::ReferencedAsset, EsmAssetReferenceVc};
 <span class="kw">use crate</span>::{
-    chunk::{EcmascriptChunkPlaceableVc, EcmascriptExports},
+    chunk::{EcmascriptChunkPlaceable, EcmascriptChunkPlaceableVc, EcmascriptExports},
     code_gen::{CodeGenerateable, CodeGenerateableVc, CodeGeneration, CodeGenerationVc},
     create_visitor,
     references::esm::base::insert_hoisted_stmt,
@@ -425,7 +425,7 @@
                     <span class="kw">let </span>ident = ReferencedAsset::get_ident_from_placeable(asset).<span class="kw">await</span><span class="question-mark">?</span>;
 
                     cjs_exports.push(<span class="macro">quote_expr!</span>(
-                        <span class="string">&quot;__turbopack__cjs__($arg)&quot;</span>,
+                        <span class="string">&quot;__turbopack_cjs__($arg)&quot;</span>,
                         arg: Expr = Ident::new(ident.into(), DUMMY_SP).into()
                     ));
                 }

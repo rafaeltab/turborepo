@@ -602,9 +602,31 @@
 <span id="602">602</span>
 <span id="603">603</span>
 <span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
 </pre><pre class="rust"><code><span class="attr">#![feature(min_specialization)]
 
 </span><span class="kw">mod </span>nft_json;
+
 <span class="kw">use </span>std::{
     collections::{BTreeSet, HashMap},
     env::current_dir,
@@ -629,7 +651,7 @@
     NothingVc, TaskId, TransientInstance, TransientValue, TurboTasks, TurboTasksBackendApi, Value,
 };
 <span class="kw">use </span>turbo_tasks_fs::{
-    glob::GlobVc, DirectoryEntry, DiskFileSystemVc, FileSystemVc, ReadGlobResultVc,
+    glob::GlobVc, DirectoryEntry, DiskFileSystemVc, FileSystem, FileSystemVc, ReadGlobResultVc,
 };
 <span class="kw">use </span>turbo_tasks_memory::{
     stats::{ReferenceType, Stats},
@@ -640,12 +662,13 @@
     resolve_options_context::ResolveOptionsContext, transition::TransitionsByNameVc,
     ModuleAssetContextVc,
 };
-<span class="kw">use </span>turbopack_cli_utils::issue::{ConsoleUi, IssueSeverityCliOption, LogOptions};
+<span class="kw">use </span>turbopack_cli_utils::issue::{ConsoleUiVc, IssueSeverityCliOption, LogOptions};
 <span class="kw">use </span>turbopack_core::{
     asset::{Asset, AssetVc, AssetsVc},
-    context::AssetContextVc,
+    compile_time_info::CompileTimeInfo,
+    context::{AssetContext, AssetContextVc},
     environment::{EnvironmentIntention, EnvironmentVc, ExecutionEnvironment, NodeJsEnvironment},
-    issue::{IssueSeverity, IssueVc},
+    issue::{IssueReporter, IssueSeverity, IssueVc},
     reference::all_assets,
     resolve::options::{ImportMapping, ResolvedMap},
     source_asset::SourceAssetVc,
@@ -731,9 +754,15 @@
     </span>exact: bool,
 
     <span class="doccomment">/// Whether to enable mdx parsing while tracing dependencies
-    </span><span class="attr">#[cfg_attr(feature = <span class="string">&quot;cli&quot;</span>, clap(short, long))]
+    </span><span class="attr">#[cfg_attr(feature = <span class="string">&quot;cli&quot;</span>, clap(long))]
     #[cfg_attr(feature = <span class="string">&quot;node-api&quot;</span>, serde(default))]
     </span>enable_mdx: bool,
+
+    <span class="doccomment">/// Enable experimental garbage collection with the provided memory limit in
+    /// MB.
+    </span><span class="attr">#[cfg_attr(feature = <span class="string">&quot;cli&quot;</span>, clap(long))]
+    #[cfg_attr(feature = <span class="string">&quot;serializable&quot;</span>, serde(default))]
+    </span><span class="kw">pub </span>memory_limit: <span class="prelude-ty">Option</span>&lt;usize&gt;,
 }
 
 <span class="attr">#[cfg_attr(feature = <span class="string">&quot;cli&quot;</span>, derive(Parser))]
@@ -852,6 +881,7 @@
         )),
         Value::new(EnvironmentIntention::Api),
     );
+    <span class="kw">let </span>compile_time_info = CompileTimeInfo { environment: env }.cell();
     <span class="kw">let </span>glob_mappings = <span class="macro">vec!</span>[
         (
             root,
@@ -866,7 +896,7 @@
     ];
     <span class="kw">let </span>context: AssetContextVc = ModuleAssetContextVc::new(
         TransitionsByNameVc::cell(HashMap::new()),
-        env,
+        compile_time_info,
         ModuleOptionsContext {
             enable_types: <span class="bool-val">true</span>,
             enable_mdx,
@@ -941,10 +971,14 @@
         .collect()
 }
 
-<span class="kw">pub async fn </span>start(args: Arc&lt;Args&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;String&gt;&gt; {
+<span class="kw">pub async fn </span>start(
+    args: Arc&lt;Args&gt;,
+    turbo_tasks: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Arc&lt;TurboTasks&lt;MemoryBackend&gt;&gt;&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;String&gt;&gt; {
     register();
     <span class="kw">let </span><span class="kw-2">&amp;</span>CommonArgs {
         visualize_graph,
+        memory_limit,
         <span class="attr">#[cfg(feature = <span class="string">&quot;persistent_cache&quot;</span>)]
             </span>cache: CacheArgs {
             <span class="kw-2">ref </span>cache,
@@ -1003,7 +1037,11 @@
 
     run(
         args.clone(),
-        || TurboTasks::new(MemoryBackend::default()),
+        || {
+            turbo_tasks.cloned().unwrap_or_else(|| {
+                TurboTasks::new(MemoryBackend::new(memory_limit.unwrap_or(usize::MAX)))
+            })
+        },
         |tt, root_task, <span class="kw">_</span>| <span class="kw">async move </span>{
             <span class="kw">if </span>visualize_graph {
                 <span class="kw">let </span><span class="kw-2">mut </span>stats = Stats::new();
@@ -1076,24 +1114,28 @@
     <span class="kw">let </span>(sender, <span class="kw-2">mut </span>receiver) = channel(<span class="number">1</span>);
     <span class="kw">let </span>dir = current_dir().unwrap();
     <span class="kw">let </span>tt = create_tt();
-    <span class="kw">let </span>console_ui = Arc::new(ConsoleUi::new(LogOptions {
-        current_dir: dir.clone(),
-        show_all,
-        log_detail,
-        log_level: log_level.map_or_else(|| IssueSeverity::Error, |l| l.<span class="number">0</span>),
-    }));
     <span class="kw">let </span>task = tt.spawn_root_task(<span class="kw">move </span>|| {
         <span class="kw">let </span>dir = dir.clone();
         <span class="kw">let </span>args = args.clone();
-        <span class="kw">let </span>console_ui = console_ui.clone();
         <span class="kw">let </span>sender = sender.clone();
         Box::pin(<span class="kw">async move </span>{
             <span class="kw">let </span>output = main_operation(TransientValue::new(dir.clone()), args.clone().into());
 
-            <span class="kw">let </span>console_ui = (<span class="kw-2">*</span>console_ui).clone().cell();
-            console_ui
-                .group_and_display_issues(TransientValue::new(output.into()))
+            <span class="kw">let </span>source = TransientValue::new(output.into());
+            <span class="kw">let </span>issues = IssueVc::peek_issues_with_path(output)
+                .<span class="kw">await</span><span class="question-mark">?
+                </span>.strongly_consistent()
                 .<span class="kw">await</span><span class="question-mark">?</span>;
+
+            <span class="kw">let </span>console_ui = ConsoleUiVc::new(TransientInstance::new(LogOptions {
+                current_dir: dir.clone(),
+                show_all,
+                log_detail,
+                log_level: log_level.map_or_else(|| IssueSeverity::Error, |l| l.<span class="number">0</span>),
+            }));
+            console_ui
+                .as_issue_reporter()
+                .report_issues(TransientInstance::new(issues), source);
 
             <span class="kw">if </span>has_return_value {
                 <span class="kw">let </span>output_read_ref = output.<span class="kw">await</span><span class="question-mark">?</span>;

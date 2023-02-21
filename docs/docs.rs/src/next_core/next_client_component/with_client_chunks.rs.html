@@ -195,6 +195,11 @@
 <span id="195">195</span>
 <span id="196">196</span>
 <span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
 </pre><pre class="rust"><code><span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>serde_json::Value;
 <span class="kw">use </span>turbo_tasks::{primitives::StringVc, ValueToString, ValueToStringVc};
@@ -205,14 +210,14 @@
         EcmascriptChunkItemVc, EcmascriptChunkPlaceable, EcmascriptChunkPlaceableVc,
         EcmascriptChunkVc, EcmascriptExports, EcmascriptExportsVc,
     },
-    utils::stringify_module_id,
+    utils::stringify_js,
 };
 <span class="kw">use </span>turbopack_core::{
     asset::{Asset, AssetContentVc, AssetVc},
     chunk::{
         ChunkGroupVc, ChunkItem, ChunkItemVc, ChunkVc, ChunkableAsset, ChunkableAssetReference,
-        ChunkableAssetReferenceVc, ChunkableAssetVc, ChunkingContextVc, ChunkingType,
-        ChunkingTypeOptionVc,
+        ChunkableAssetReferenceVc, ChunkableAssetVc, ChunkingContext, ChunkingContextVc,
+        ChunkingType, ChunkingTypeOptionVc,
     },
     reference::{AssetReference, AssetReferenceVc, AssetReferencesVc},
     resolve::{ResolveResult, ResolveResultVc},
@@ -303,6 +308,11 @@
     }
 
     <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">fn </span>related_path(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc {
+        <span class="self">self</span>.inner.path()
+    }
+
+    <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">async fn </span>content(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;EcmascriptChunkItemContentVc&gt; {
         <span class="kw">let </span>inner = <span class="self">self</span>.inner.<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span>group = ChunkGroupVc::from_asset(inner.asset.into(), <span class="self">self</span>.context);
@@ -322,7 +332,7 @@
                 }
             }
         }
-        <span class="kw">let </span>module_id = stringify_module_id(<span class="kw-2">&amp;*</span>inner.asset.as_chunk_item(<span class="self">self</span>.context).id().<span class="kw">await</span><span class="question-mark">?</span>);
+        <span class="kw">let </span>module_id = stringify_js(<span class="kw-2">&amp;*</span>inner.asset.as_chunk_item(<span class="self">self</span>.context).id().<span class="kw">await</span><span class="question-mark">?</span>);
         <span class="prelude-val">Ok</span>(EcmascriptChunkItemContent {
             inner_code: <span class="macro">format!</span>(
                 <span class="string">&quot;__turbopack_esm__({{
@@ -381,7 +391,7 @@ const chunks = {};
 </span><span class="kw">impl </span>AssetReference <span class="kw">for </span>WithClientChunksAssetReference {
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">fn </span>resolve_reference(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ResolveResultVc {
-        ResolveResult::Single(<span class="self">self</span>.asset, Vec::new()).cell()
+        ResolveResult::asset(<span class="self">self</span>.asset).cell()
     }
 }
 
