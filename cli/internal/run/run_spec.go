@@ -74,6 +74,10 @@ type runOpts struct {
 	graphFile     string
 	noDaemon      bool
 	singlePackage bool
+  
 	// The order of the logs, either 'grouped' or 'stream'
 	logOrder string
+
+	// logPrefix controls whether we should print a prefix in task logs
+	logPrefix string
 }
