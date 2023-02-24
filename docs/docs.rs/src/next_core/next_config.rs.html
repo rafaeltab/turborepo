@@ -600,6 +600,9 @@
 <span id="600">600</span>
 <span id="601">601</span>
 <span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
 </pre><pre class="rust"><code><span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>indexmap::IndexMap;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -607,14 +610,11 @@
 <span class="kw">use </span>turbo_tasks::{
     primitives::{BoolVc, StringsVc},
     trace::TraceRawVcs,
-    Value,
+    CompletionVc, Value,
 };
 <span class="kw">use </span>turbo_tasks_env::EnvMapVc;
 <span class="kw">use </span>turbo_tasks_fs::json::parse_json_rope_with_source_context;
-<span class="kw">use </span>turbopack::{
-    evaluate_context::node_evaluate_asset_context,
-    module_options::{WebpackLoadersOptions, WebpackLoadersOptionsVc},
-};
+<span class="kw">use </span>turbopack::evaluate_context::node_evaluate_asset_context;
 <span class="kw">use </span>turbopack_core::{
     asset::Asset,
     context::AssetContext,
@@ -633,7 +633,7 @@
 <span class="kw">use </span>turbopack_node::{
     evaluate::{evaluate, JavaScriptValue},
     execution_context::{ExecutionContext, ExecutionContextVc},
-    transforms::webpack::{WebpackLoaderConfigs, WebpackLoaderConfigsVc},
+    transforms::webpack::{WebpackLoaderConfigItems, WebpackLoaderConfigItemsVc},
 };
 
 <span class="kw">use </span><span class="kw">crate</span>::embed_js::next_asset;
@@ -938,7 +938,7 @@
 <span class="attr">#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TraceRawVcs)]
 #[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
 </span><span class="kw">pub struct </span>ExperimentalTurboConfig {
-    <span class="kw">pub </span>loaders: <span class="prelude-ty">Option</span>&lt;IndexMap&lt;String, WebpackLoaderConfigs&gt;&gt;,
+    <span class="kw">pub </span>loaders: <span class="prelude-ty">Option</span>&lt;IndexMap&lt;String, WebpackLoaderConfigItems&gt;&gt;,
     <span class="kw">pub </span>resolve_alias: <span class="prelude-ty">Option</span>&lt;IndexMap&lt;String, JsonValue&gt;&gt;,
 }
 
@@ -1048,6 +1048,10 @@
     Config { exclude: <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; },
 }
 
+<span class="attr">#[derive(Default)]
+#[turbo_tasks::value(transparent)]
+</span><span class="kw">pub struct </span>WebpackExtensionToLoaders(IndexMap&lt;String, WebpackLoaderConfigItemsVc&gt;);
+
 <span class="attr">#[turbo_tasks::value_impl]
 </span><span class="kw">impl </span>NextConfigVc {
     <span class="attr">#[turbo_tasks::function]
@@ -1102,20 +1106,19 @@
     }
 
     <span class="attr">#[turbo_tasks::function]
-    </span><span class="kw">pub async fn </span>webpack_loaders_options(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;WebpackLoadersOptionsVc&gt; {
+    </span><span class="kw">pub async fn </span>webpack_loaders_options(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;WebpackExtensionToLoadersVc&gt; {
         <span class="kw">let </span>this = <span class="self">self</span>.<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span><span class="prelude-val">Some</span>(turbo_loaders) = this.experimental.turbo.as_ref().and_then(|t| t.loaders.as_ref()) <span class="kw">else </span>{
-            <span class="kw">return </span><span class="prelude-val">Ok</span>(WebpackLoadersOptionsVc::cell(WebpackLoadersOptions::default()));
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(WebpackExtensionToLoadersVc::cell(IndexMap::new()));
         };
         <span class="kw">let </span><span class="kw-2">mut </span>extension_to_loaders = IndexMap::new();
         <span class="kw">for </span>(ext, loaders) <span class="kw">in </span>turbo_loaders {
-            extension_to_loaders.insert(ext.clone(), WebpackLoaderConfigsVc::cell(loaders.clone()));
+            extension_to_loaders.insert(
+                ext.clone(),
+                WebpackLoaderConfigItemsVc::cell(loaders.<span class="number">0</span>.clone()),
+            );
         }
-        <span class="prelude-val">Ok</span>(WebpackLoadersOptions {
-            extension_to_loaders,
-            ..Default::default()
-        }
-        .cell())
+        <span class="prelude-val">Ok</span>(WebpackExtensionToLoaders(extension_to_loaders).cell())
     }
 
     <span class="attr">#[turbo_tasks::function]
@@ -1143,6 +1146,7 @@
     <span class="kw">let </span>ExecutionContext {
         project_root,
         intermediate_output_path,
+        env,
     } = <span class="kw-2">*</span>execution_context.<span class="kw">await</span><span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>import_map = ImportMap::default();
 
@@ -1181,11 +1185,13 @@
         project_root,
         load_next_config_asset,
         project_root,
+        env,
         config_asset.map_or(project_root, |c| c.path()),
         context,
         intermediate_output_path,
         runtime_entries,
         <span class="macro">vec!</span>[],
+        CompletionVc::immutable(),
         <span class="comment">/* debug */ </span><span class="bool-val">false</span>,
     )
     .<span class="kw">await</span><span class="question-mark">?</span>;

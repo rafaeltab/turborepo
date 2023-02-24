@@ -336,13 +336,18 @@
 <span id="336">336</span>
 <span id="337">337</span>
 <span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::HashMap;
 
 <span class="kw">use </span>anyhow::{bail, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>serde::Deserialize;
 <span class="kw">use </span>turbo_tasks::{
     primitives::{JsonValueVc, StringsVc},
-    Value,
+    CompletionVc, Value,
 };
 <span class="kw">use </span>turbo_tasks_fs::{
     json::parse_json_rope_with_source_context, to_sys_path, File, FileSystemPathVc,
@@ -370,7 +375,7 @@
 };
 
 <span class="kw">use crate</span>::{
-    embed_js::{next_asset, wrap_with_next_js_fs},
+    embed_js::{next_asset, next_js_file, wrap_with_next_js_fs},
     next_config::NextConfigVc,
     next_edge::{
         context::{get_edge_compile_time_info, get_edge_resolve_options_context},
@@ -602,6 +607,7 @@
         edge_resolve_options_context,
         output_path,
         base_path: project_path,
+        bootstrap_file: next_js_file(<span class="string">&quot;entry/edge-bootstrap.ts&quot;</span>),
     }
     .cell()
     .into();
@@ -619,10 +625,12 @@
     request: RouterRequestVc,
     next_config: NextConfigVc,
     server_addr: ServerAddrVc,
+    routes_changed: CompletionVc,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;RouterResultVc&gt; {
     <span class="kw">let </span>ExecutionContext {
         project_root,
         intermediate_output_path,
+        env,
     } = <span class="kw-2">*</span>execution_context.<span class="kw">await</span><span class="question-mark">?</span>;
     <span class="kw">let </span>project_path = wrap_with_next_js_fs(project_root);
     <span class="kw">let </span>intermediate_output_path = intermediate_output_path.join(<span class="string">&quot;router&quot;</span>);
@@ -651,6 +659,7 @@
         project_path,
         router_asset,
         project_root,
+        env,
         project_root,
         context,
         intermediate_output_path,
@@ -659,6 +668,7 @@
             JsonValueVc::cell(request),
             JsonValueVc::cell(dir.to_string_lossy().into()),
         ],
+        routes_changed,
         <span class="bool-val">false</span>,
     )
     .<span class="kw">await</span><span class="question-mark">?</span>;

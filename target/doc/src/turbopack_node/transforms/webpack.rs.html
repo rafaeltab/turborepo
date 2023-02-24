@@ -189,10 +189,13 @@
 <span id="189">189</span>
 <span id="190">190</span>
 <span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
 </pre><pre class="rust"><code><span class="kw">use </span>anyhow::{bail, Context, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>serde_json::json;
-<span class="kw">use </span>turbo_tasks::{primitives::JsonValueVc, trace::TraceRawVcs, Value};
+<span class="kw">use </span>turbo_tasks::{primitives::JsonValueVc, trace::TraceRawVcs, CompletionVc, Value};
 <span class="kw">use </span>turbo_tasks_fs::{
     json::parse_json_rope_with_source_context, File, FileContent, FileSystemPathVc,
 };
@@ -226,7 +229,7 @@
 
 <span class="attr">#[derive(Clone, PartialEq, Eq, Debug, TraceRawVcs, Serialize, Deserialize)]
 #[serde(untagged)]
-</span><span class="kw">pub enum </span>WebpackLoaderConfig {
+</span><span class="kw">pub enum </span>WebpackLoaderConfigItem {
     LoaderName(String),
     LoaderNameWithOptions {
         loader: String,
@@ -236,14 +239,14 @@
 }
 
 <span class="attr">#[derive(Debug, Clone)]
-#[turbo_tasks::value(shared)]
-</span><span class="kw">pub struct </span>WebpackLoaderConfigs(Vec&lt;WebpackLoaderConfig&gt;);
+#[turbo_tasks::value(shared, transparent)]
+</span><span class="kw">pub struct </span>WebpackLoaderConfigItems(<span class="kw">pub </span>Vec&lt;WebpackLoaderConfigItem&gt;);
 
 <span class="attr">#[turbo_tasks::value]
 </span><span class="kw">pub struct </span>WebpackLoaders {
     evaluate_context: AssetContextVc,
     execution_context: ExecutionContextVc,
-    loaders: WebpackLoaderConfigsVc,
+    loaders: WebpackLoaderConfigItemsVc,
 }
 
 <span class="attr">#[turbo_tasks::value_impl]
@@ -252,7 +255,7 @@
     </span><span class="kw">pub fn </span>new(
         evaluate_context: AssetContextVc,
         execution_context: ExecutionContextVc,
-        loaders: WebpackLoaderConfigsVc,
+        loaders: WebpackLoaderConfigItemsVc,
     ) -&gt; <span class="self">Self </span>{
         WebpackLoaders {
             evaluate_context,
@@ -282,7 +285,7 @@
 </span><span class="kw">struct </span>WebpackLoadersProcessedAsset {
     evaluate_context: AssetContextVc,
     execution_context: ExecutionContextVc,
-    loaders: WebpackLoaderConfigsVc,
+    loaders: WebpackLoaderConfigItemsVc,
     source: AssetVc,
 }
 
@@ -330,6 +333,7 @@
         <span class="kw">let </span>ExecutionContext {
             project_root,
             intermediate_output_path,
+            env,
         } = <span class="kw-2">*</span>this.execution_context.<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span>source_content = this.source.content();
         <span class="kw">let </span>AssetContent::File(file) = <span class="kw-2">*</span>source_content.<span class="kw">await</span><span class="question-mark">? </span><span class="kw">else </span>{
@@ -352,6 +356,7 @@
             project_root,
             webpack_loaders_executor,
             project_root,
+            env,
             this.source.path(),
             context,
             intermediate_output_path,
@@ -361,6 +366,7 @@
                 JsonValueVc::cell(resource_path.into()),
                 JsonValueVc::cell(<span class="macro">json!</span>(<span class="kw-2">*</span>loaders)),
             ],
+            CompletionVc::immutable(),
             <span class="comment">/* debug */ </span><span class="bool-val">false</span>,
         )
         .<span class="kw">await</span><span class="question-mark">?</span>;
