@@ -341,13 +341,74 @@
 <span id="341">341</span>
 <span id="342">342</span>
 <span id="343">343</span>
-</pre><pre class="rust"><code><span class="kw">use </span>std::collections::HashMap;
-
-<span class="kw">use </span>anyhow::{bail, <span class="prelude-ty">Result</span>};
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+</pre><pre class="rust"><code><span class="kw">use </span>anyhow::{bail, <span class="prelude-ty">Result</span>};
+<span class="kw">use </span>indexmap::indexmap;
 <span class="kw">use </span>serde::Deserialize;
+<span class="kw">use </span>serde_json::json;
 <span class="kw">use </span>turbo_tasks::{
     primitives::{JsonValueVc, StringsVc},
-    CompletionVc, Value,
+    CompletionVc, CompletionsVc, Value,
 };
 <span class="kw">use </span>turbo_tasks_fs::{
     json::parse_json_rope_with_source_context, to_sys_path, File, FileSystemPathVc,
@@ -355,18 +416,20 @@
 <span class="kw">use </span>turbopack::{evaluate_context::node_evaluate_asset_context, transition::TransitionsByNameVc};
 <span class="kw">use </span>turbopack_core::{
     asset::AssetVc,
+    changed::any_content_changed,
     chunk::dev::DevChunkingContextVc,
     context::{AssetContext, AssetContextVc},
     environment::{EnvironmentIntention::Middleware, ServerAddrVc},
+    ident::AssetIdentVc,
+    issue::IssueVc,
     reference_type::{EcmaScriptModulesReferenceSubType, ReferenceType},
     resolve::{find_context_file, FindContextFileResult},
     source_asset::SourceAssetVc,
     virtual_asset::VirtualAssetVc,
 };
 <span class="kw">use </span>turbopack_ecmascript::{
-    chunk::EcmascriptChunkPlaceablesVc, EcmascriptInputTransform, EcmascriptInputTransformsVc,
-    EcmascriptModuleAssetType, EcmascriptModuleAssetVc, InnerAssetsVc,
-    OptionEcmascriptModuleAssetVc,
+    EcmascriptInputTransform, EcmascriptInputTransformsVc, EcmascriptModuleAssetType,
+    EcmascriptModuleAssetVc, InnerAssetsVc, OptionEcmascriptModuleAssetVc,
 };
 <span class="kw">use </span>turbopack_node::{
     evaluate::{evaluate, JavaScriptValue},
@@ -375,14 +438,15 @@
 };
 
 <span class="kw">use crate</span>::{
-    embed_js::{next_asset, next_js_file, wrap_with_next_js_fs},
+    embed_js::{next_asset, next_js_file},
     next_config::NextConfigVc,
     next_edge::{
         context::{get_edge_compile_time_info, get_edge_resolve_options_context},
         transition::NextEdgeTransition,
     },
     next_import_map::get_next_build_import_map,
-    next_server::context::ServerContextType,
+    next_server::context::{get_server_module_options_context, ServerContextType},
+    util::{parse_config_from_source, NextSourceConfigVc},
 };
 
 <span class="attr">#[turbo_tasks::function]
@@ -513,14 +577,15 @@
 }
 
 <span class="attr">#[turbo_tasks::function]
-</span><span class="kw">async fn </span>watch_files_hack(
+</span><span class="kw">async fn </span>next_config_changed(
     context: AssetContextVc,
     project_path: FileSystemPathVc,
-) -&gt; <span class="prelude-ty">Result</span>&lt;EcmascriptChunkPlaceablesVc&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;CompletionVc&gt; {
     <span class="kw">let </span>next_config = get_config(context, project_path, next_configs()).<span class="kw">await</span><span class="question-mark">?</span>;
-    <span class="prelude-val">Ok</span>(<span class="kw">match </span><span class="kw-2">&amp;*</span>next_config {
-        <span class="prelude-val">Some</span>(c) =&gt; EcmascriptChunkPlaceablesVc::cell(<span class="macro">vec!</span>[c.as_ecmascript_chunk_placeable()]),
-        <span class="prelude-val">None </span>=&gt; EcmascriptChunkPlaceablesVc::empty(),
+    <span class="prelude-val">Ok</span>(<span class="kw">if let </span><span class="prelude-val">Some</span>(c) = <span class="kw-2">*</span>next_config {
+        any_content_changed(c.into())
+    } <span class="kw">else </span>{
+        CompletionVc::immutable()
     })
 }
 
@@ -537,37 +602,56 @@
     // is no middleware file, then we need to generate a default empty manifest
     // and we cannot process it with the next-edge transition because it
     // requires a real file for some reason.
-    </span><span class="kw">let </span>middleware_manifest = <span class="kw">match </span><span class="kw-2">&amp;*</span>middleware_config {
-        <span class="prelude-val">Some</span>(c) =&gt; context.with_transition(<span class="string">&quot;next-edge&quot;</span>).process(
-            c.as_asset(),
-            Value::new(ReferenceType::EcmaScriptModules(
-                EcmaScriptModulesReferenceSubType::Undefined,
-            )),
-        ),
-        <span class="prelude-val">None </span>=&gt; as_es_module_asset(
-            VirtualAssetVc::new(
-                project_path.join(<span class="string">&quot;middleware.js&quot;</span>),
-                File::from(<span class="string">&quot;export default [];&quot;</span>).into(),
+    </span><span class="kw">let </span>(manifest, config) = <span class="kw">match </span><span class="kw-2">&amp;*</span>middleware_config {
+        <span class="prelude-val">Some</span>(c) =&gt; {
+            <span class="kw">let </span>manifest = context.with_transition(<span class="string">&quot;next-edge&quot;</span>).process(
+                c.as_asset(),
+                Value::new(ReferenceType::EcmaScriptModules(
+                    EcmaScriptModulesReferenceSubType::Undefined,
+                )),
+            );
+            <span class="kw">let </span>config = parse_config_from_source(c.as_asset());
+            (manifest, config)
+        }
+        <span class="prelude-val">None </span>=&gt; {
+            <span class="kw">let </span>manifest = as_es_module_asset(
+                VirtualAssetVc::new(
+                    project_path.join(<span class="string">&quot;middleware.js&quot;</span>),
+                    File::from(<span class="string">&quot;export default [];&quot;</span>).into(),
+                )
+                .as_asset(),
+                context,
             )
-            .as_asset(),
-            context,
-        )
-        .as_asset(),
+            .as_asset();
+            <span class="kw">let </span>config = NextSourceConfigVc::default();
+            (manifest, config)
+        }
     };
 
-    <span class="kw">let </span><span class="kw-2">mut </span>inner = HashMap::new();
-    inner.insert(<span class="string">&quot;MIDDLEWARE_CHUNK_GROUP&quot;</span>.to_string(), middleware_manifest);
-    <span class="prelude-val">Ok</span>(InnerAssetsVc::cell(inner))
+    <span class="kw">let </span>config_asset = as_es_module_asset(
+        VirtualAssetVc::new(
+            project_path.join(<span class="string">&quot;middleware_config.js&quot;</span>),
+            File::from(<span class="macro">format!</span>(
+                <span class="string">&quot;export default {};&quot;</span>,
+                <span class="macro">json!</span>({ <span class="string">&quot;matcher&quot;</span>: <span class="kw-2">&amp;</span>config.<span class="kw">await</span><span class="question-mark">?</span>.matcher })
+            ))
+            .into(),
+        )
+        .as_asset(),
+        context,
+    )
+    .as_asset();
+
+    <span class="prelude-val">Ok</span>(InnerAssetsVc::cell(<span class="macro">indexmap! </span>{
+        <span class="string">&quot;MIDDLEWARE_CHUNK_GROUP&quot;</span>.to_string() =&gt; manifest,
+        <span class="string">&quot;MIDDLEWARE_CONFIG&quot;</span>.to_string() =&gt; config_asset,
+    }))
 }
 
 <span class="attr">#[turbo_tasks::function]
-</span><span class="kw">fn </span>route_executor(
-    context: AssetContextVc,
-    project_path: FileSystemPathVc,
-    configs: InnerAssetsVc,
-) -&gt; AssetVc {
+</span><span class="kw">fn </span>route_executor(context: AssetContextVc, configs: InnerAssetsVc) -&gt; AssetVc {
     EcmascriptModuleAssetVc::new_with_inner_assets(
-        next_asset(project_path.join(<span class="string">&quot;router.js&quot;</span>), <span class="string">&quot;entry/router.ts&quot;</span>),
+        next_asset(<span class="string">&quot;entry/router.ts&quot;</span>),
         context,
         Value::new(EcmascriptModuleAssetType::Typescript),
         EcmascriptInputTransformsVc::cell(<span class="macro">vec!</span>[EcmascriptInputTransform::TypeScript]),
@@ -583,6 +667,7 @@
     project_path: FileSystemPathVc,
     output_path: FileSystemPathVc,
     next_config: NextConfigVc,
+    execution_context: ExecutionContextVc,
 ) -&gt; TransitionsByNameVc {
     <span class="kw">let </span>edge_compile_time_info = get_edge_compile_time_info(server_addr, Value::new(Middleware));
 
@@ -599,15 +684,25 @@
         project_path,
         Value::new(ServerContextType::Middleware),
         next_config,
+        execution_context,
+    );
+
+    <span class="kw">let </span>server_module_options_context = get_server_module_options_context(
+        project_path,
+        execution_context,
+        Value::new(ServerContextType::Middleware),
+        next_config,
     );
 
     <span class="kw">let </span>next_edge_transition = NextEdgeTransition {
         edge_compile_time_info,
         edge_chunking_context,
+        edge_module_options_context: <span class="prelude-val">Some</span>(server_module_options_context),
         edge_resolve_options_context,
-        output_path,
+        output_path: output_path.root(),
         base_path: project_path,
         bootstrap_file: next_js_file(<span class="string">&quot;entry/edge-bootstrap.ts&quot;</span>),
+        entry_name: <span class="string">&quot;middleware&quot;</span>.to_string(),
     }
     .cell()
     .into();
@@ -627,49 +722,76 @@
     server_addr: ServerAddrVc,
     routes_changed: CompletionVc,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;RouterResultVc&gt; {
+    <span class="kw">let </span>RouterRequest {
+        <span class="kw-2">ref </span>method,
+        <span class="kw-2">ref </span>pathname,
+        ..
+    } = <span class="kw-2">*</span>request.<span class="kw">await</span><span class="question-mark">?</span>;
+    IssueVc::attach_description(
+        <span class="macro">format!</span>(<span class="string">&quot;Next.js Routing for {} {}&quot;</span>, method, pathname),
+        route_internal(
+            execution_context,
+            request,
+            next_config,
+            server_addr,
+            routes_changed,
+        ),
+    )
+    .<span class="kw">await
+</span>}
+
+<span class="attr">#[turbo_tasks::function]
+</span><span class="kw">async fn </span>route_internal(
+    execution_context: ExecutionContextVc,
+    request: RouterRequestVc,
+    next_config: NextConfigVc,
+    server_addr: ServerAddrVc,
+    routes_changed: CompletionVc,
+) -&gt; <span class="prelude-ty">Result</span>&lt;RouterResultVc&gt; {
     <span class="kw">let </span>ExecutionContext {
-        project_root,
+        project_path,
         intermediate_output_path,
         env,
     } = <span class="kw-2">*</span>execution_context.<span class="kw">await</span><span class="question-mark">?</span>;
-    <span class="kw">let </span>project_path = wrap_with_next_js_fs(project_root);
     <span class="kw">let </span>intermediate_output_path = intermediate_output_path.join(<span class="string">&quot;router&quot;</span>);
 
     <span class="kw">let </span>context = node_evaluate_asset_context(
-        <span class="prelude-val">Some</span>(get_next_build_import_map(project_path)),
+        project_path,
+        <span class="prelude-val">Some</span>(get_next_build_import_map()),
         <span class="prelude-val">Some</span>(edge_transition_map(
             server_addr,
             project_path,
             intermediate_output_path,
             next_config,
+            execution_context,
         )),
     );
 
     <span class="kw">let </span>configs = config_assets(context, project_path, next_config.page_extensions());
-    <span class="kw">let </span>router_asset = route_executor(context, project_path, configs);
+    <span class="kw">let </span>router_asset = route_executor(context, configs);
 
-    <span class="comment">// TODO this is a hack to get these files watched.
-    </span><span class="kw">let </span>next_config = watch_files_hack(context, project_path);
+    <span class="comment">// This invalidates the router when the next config changes
+    </span><span class="kw">let </span>next_config_changed = next_config_changed(context, project_path);
 
     <span class="kw">let </span>request = serde_json::value::to_value(<span class="kw-2">&amp;*</span>request.<span class="kw">await</span><span class="question-mark">?</span>)<span class="question-mark">?</span>;
-    <span class="kw">let </span><span class="prelude-val">Some</span>(dir) = to_sys_path(project_root).<span class="kw">await</span><span class="question-mark">? </span><span class="kw">else </span>{
+    <span class="kw">let </span><span class="prelude-val">Some</span>(dir) = to_sys_path(project_path).<span class="kw">await</span><span class="question-mark">? </span><span class="kw">else </span>{
         <span class="macro">bail!</span>(<span class="string">&quot;Next.js requires a disk path to check for valid routes&quot;</span>);
     };
     <span class="kw">let </span>result = evaluate(
         project_path,
         router_asset,
-        project_root,
+        project_path,
         env,
-        project_root,
+        AssetIdentVc::from_path(project_path),
         context,
         intermediate_output_path,
-        <span class="prelude-val">Some</span>(next_config),
+        <span class="prelude-val">None</span>,
         <span class="macro">vec!</span>[
             JsonValueVc::cell(request),
             JsonValueVc::cell(dir.to_string_lossy().into()),
         ],
-        routes_changed,
-        <span class="bool-val">false</span>,
+        CompletionsVc::all(<span class="macro">vec!</span>[next_config_changed, routes_changed]),
+        <span class="comment">/* debug */ </span><span class="bool-val">false</span>,
     )
     .<span class="kw">await</span><span class="question-mark">?</span>;
 

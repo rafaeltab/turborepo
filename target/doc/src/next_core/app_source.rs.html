@@ -733,15 +733,33 @@
 <span id="733">733</span>
 <span id="734">734</span>
 <span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     collections::{BTreeMap, HashMap},
     io::Write,
+    iter::once,
 };
 
 <span class="kw">use </span>anyhow::{anyhow, <span class="prelude-ty">Result</span>};
+<span class="kw">use </span>indexmap::indexmap;
 <span class="kw">use </span>turbo_tasks::{TryJoinIterExt, Value, ValueToString};
-<span class="kw">use </span>turbo_tasks_env::ProcessEnvVc;
-<span class="kw">use </span>turbo_tasks_fs::{rebase, rope::RopeBuilder, File, FileContent, FileSystemPathVc};
+<span class="kw">use </span>turbo_tasks_env::{CustomProcessEnvVc, EnvMapVc, ProcessEnvVc};
+<span class="kw">use </span>turbo_tasks_fs::{rope::RopeBuilder, File, FileContent, FileSystemPathVc};
 <span class="kw">use </span>turbopack::{
     ecmascript::EcmascriptInputTransform,
     transition::{TransitionVc, TransitionsByNameVc},
@@ -780,7 +798,7 @@
         next_layout_entry_transition::NextLayoutEntryTransition, LayoutSegment, LayoutSegmentsVc,
     },
     app_structure::{AppStructure, AppStructureItem, AppStructureVc, OptionAppStructureVc},
-    embed_js::{next_js_file, wrap_with_next_js_fs},
+    embed_js::next_js_file,
     env::env_for_js,
     fallback::get_fallback_page,
     next_client::{
@@ -833,9 +851,10 @@
         ty,
         next_config,
     );
-    <span class="kw">let </span>client_runtime_entries = get_client_runtime_entries(project_path, env, ty, next_config);
+    <span class="kw">let </span>client_runtime_entries =
+        get_client_runtime_entries(project_path, env, ty, next_config, execution_context);
     <span class="kw">let </span>client_resolve_options_context =
-        get_client_resolve_options_context(project_path, ty, next_config);
+        get_client_resolve_options_context(project_path, ty, next_config, execution_context);
 
     <span class="prelude-val">Ok</span>(NextClientTransition {
         is_app: <span class="bool-val">true</span>,
@@ -871,6 +890,7 @@
             project_path,
             ty,
             next_config,
+            execution_context,
         ),
         ssr_environment: get_server_compile_time_info(ty, process_env, server_addr),
     }
@@ -891,7 +911,7 @@
     <span class="kw">let </span>ty = Value::new(ServerContextType::AppRSC { app_dir });
     <span class="kw">let </span>rsc_compile_time_info = get_server_compile_time_info(ty, process_env, server_addr);
     <span class="kw">let </span>rsc_resolve_options_context =
-        get_server_resolve_options_context(project_path, ty, next_config);
+        get_server_resolve_options_context(project_path, ty, next_config, execution_context);
     <span class="kw">let </span>rsc_module_options_context =
         get_server_module_options_context(project_path, execution_context, ty, next_config);
 
@@ -913,6 +933,7 @@
     next_config: NextConfigVc,
     server_addr: ServerAddrVc,
     output_path: FileSystemPathVc,
+    execution_context: ExecutionContextVc,
 ) -&gt; TransitionVc {
     <span class="kw">let </span>server_ty = Value::new(ServerContextType::AppRoute { app_dir });
 
@@ -928,15 +949,17 @@
     )
     .build();
     <span class="kw">let </span>edge_resolve_options_context =
-        get_edge_resolve_options_context(project_path, server_ty, next_config);
+        get_edge_resolve_options_context(project_path, server_ty, next_config, execution_context);
 
     NextEdgeTransition {
         edge_compile_time_info,
         edge_chunking_context,
+        edge_module_options_context: <span class="prelude-val">None</span>,
         edge_resolve_options_context,
         output_path,
         base_path: app_dir,
         bootstrap_file: next_js_file(<span class="string">&quot;entry/app/route-bootstrap.ts&quot;</span>),
+        entry_name: <span class="string">&quot;edge&quot;</span>.to_string(),
     }
     .cell()
     .into()
@@ -968,6 +991,7 @@
             next_config,
             server_addr,
             output_path,
+            execution_context,
         ),
     );
     transitions.insert(
@@ -1028,7 +1052,7 @@
         TransitionsByNameVc::cell(transitions),
         get_server_compile_time_info(ssr_ty, env, server_addr),
         get_server_module_options_context(project_path, execution_context, ssr_ty, next_config),
-        get_server_resolve_options_context(project_path, ssr_ty, next_config),
+        get_server_resolve_options_context(project_path, ssr_ty, next_config, execution_context),
     )
     .into()
 }
@@ -1047,8 +1071,6 @@
     next_config: NextConfigVc,
     server_addr: ServerAddrVc,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;ContentSourceVc&gt; {
-    <span class="kw">let </span>project_path = wrap_with_next_js_fs(project_path);
-
     <span class="kw">let </span><span class="prelude-val">Some</span>(app_structure) = <span class="kw-2">*</span>app_structure.<span class="kw">await</span><span class="question-mark">? </span><span class="kw">else </span>{
         <span class="kw">return </span><span class="prelude-val">Ok</span>(NoContentSourceVc::new().into());
     };
@@ -1081,11 +1103,11 @@
         output_path,
     );
 
+    <span class="kw">let </span>injected_env = env_for_js(EnvMapVc::empty().into(), <span class="bool-val">false</span>, next_config);
+    <span class="kw">let </span>env = CustomProcessEnvVc::new(env, next_config.env()).as_process_env();
+
     <span class="kw">let </span>server_runtime_entries =
-        <span class="macro">vec!</span>[
-            ProcessEnvAssetVc::new(project_path, env_for_js(env, <span class="bool-val">false</span>, next_config))
-                .as_ecmascript_chunk_placeable(),
-        ];
+        <span class="macro">vec!</span>[ProcessEnvAssetVc::new(project_path, injected_env).as_ecmascript_chunk_placeable()];
 
     <span class="kw">let </span>fallback_page = get_fallback_page(
         project_path,
@@ -1096,16 +1118,18 @@
         next_config,
     );
 
-    <span class="prelude-val">Ok</span>(create_app_source_for_directory(
+    <span class="kw">let </span>source = create_app_source_for_directory(
         app_structure,
         context_ssr,
         context,
         project_path,
+        env,
         server_root,
         EcmascriptChunkPlaceablesVc::cell(server_runtime_entries),
         fallback_page,
         output_path,
-    ))
+    );
+    <span class="prelude-val">Ok</span>(source)
 }
 
 <span class="attr">#[allow(clippy::too_many_arguments)]
@@ -1115,6 +1139,7 @@
     context_ssr: AssetContextVc,
     context: AssetContextVc,
     project_path: FileSystemPathVc,
+    env: ProcessEnvVc,
     server_root: FileSystemPathVc,
     runtime_entries: EcmascriptChunkPlaceablesVc,
     fallback_page: DevHtmlAssetVc,
@@ -1142,6 +1167,7 @@
 
                 sources.push(create_node_rendered_source(
                     project_path,
+                    env,
                     specificity,
                     server_root,
                     params_matcher.into(),
@@ -1154,11 +1180,7 @@
                         page_path: page,
                         target,
                         project_path,
-                        intermediate_output_path: rebase(
-                            directory,
-                            project_path,
-                            intermediate_output_path_root,
-                        ),
+                        intermediate_output_path: intermediate_output_path_root,
                     }
                     .cell()
                     .into(),
@@ -1177,6 +1199,7 @@
 
                 sources.push(create_node_api_source(
                     project_path,
+                    env,
                     specificity,
                     server_root,
                     params_matcher.into(),
@@ -1186,11 +1209,7 @@
                         server_root,
                         entry_path: route,
                         project_path,
-                        intermediate_output_path: rebase(
-                            directory,
-                            project_path,
-                            intermediate_output_path_root,
-                        ),
+                        intermediate_output_path: intermediate_output_path_root,
                         output_root: intermediate_output_path_root,
                     }
                     .cell()
@@ -1208,20 +1227,31 @@
             <span class="kw">return </span><span class="prelude-val">Ok</span>(NoContentSourceVc::new().into());
         }
     }
-    <span class="kw">for </span>child <span class="kw">in </span>children.iter() {
-        sources.push(create_app_source_for_directory(
-            <span class="kw-2">*</span>child,
-            context_ssr,
-            context,
-            project_path,
-            server_root,
-            runtime_entries,
-            fallback_page,
-            intermediate_output_path_root,
-        ));
-    }
 
-    <span class="prelude-val">Ok</span>(CombinedContentSource { sources }.cell().into())
+    <span class="kw">let </span>source = CombinedContentSource { sources }
+        .cell()
+        .as_content_source()
+        .issue_context(directory, <span class="string">&quot;Next.js App Router&quot;</span>);
+
+    <span class="prelude-val">Ok</span>(CombinedContentSource {
+        sources: once(source)
+            .chain(children.iter().map(|child| {
+                create_app_source_for_directory(
+                    <span class="kw-2">*</span>child,
+                    context_ssr,
+                    context,
+                    project_path,
+                    env,
+                    server_root,
+                    runtime_entries,
+                    fallback_page,
+                    intermediate_output_path_root,
+                )
+            }))
+            .collect(),
+    }
+    .cell()
+    .into())
 }
 
 <span class="doccomment">/// The renderer for pages in app directory
@@ -1450,7 +1480,9 @@ import BOOTSTRAP from {};
                 Value::new(EcmascriptModuleAssetType::Typescript),
                 EcmascriptInputTransformsVc::cell(<span class="macro">vec!</span>[EcmascriptInputTransform::TypeScript]),
                 this.context.compile_time_info(),
-                InnerAssetsVc::cell(HashMap::from([(<span class="string">&quot;ROUTE_CHUNK_GROUP&quot;</span>.to_string(), entry)])),
+                InnerAssetsVc::cell(<span class="macro">indexmap! </span>{
+                    <span class="string">&quot;ROUTE_CHUNK_GROUP&quot;</span>.to_string() =&gt; entry
+                }),
             ),
             chunking_context,
             intermediate_output_path: this.intermediate_output_path,

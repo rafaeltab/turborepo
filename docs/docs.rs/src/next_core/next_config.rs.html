@@ -603,6 +603,25 @@
 <span id="603">603</span>
 <span id="604">604</span>
 <span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
 </pre><pre class="rust"><code><span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>indexmap::IndexMap;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -613,11 +632,14 @@
     CompletionVc, Value,
 };
 <span class="kw">use </span>turbo_tasks_env::EnvMapVc;
-<span class="kw">use </span>turbo_tasks_fs::json::parse_json_rope_with_source_context;
+<span class="kw">use </span>turbo_tasks_fs::{json::parse_json_rope_with_source_context, FileSystemPathVc};
 <span class="kw">use </span>turbopack::evaluate_context::node_evaluate_asset_context;
 <span class="kw">use </span>turbopack_core::{
     asset::Asset,
+    changed::any_content_changed,
     context::AssetContext,
+    ident::AssetIdentVc,
+    issue::IssueContextExt,
     reference_type::{EntryReferenceSubType, ReferenceType},
     resolve::{
         find_context_file,
@@ -627,8 +649,7 @@
     source_asset::SourceAssetVc,
 };
 <span class="kw">use </span>turbopack_ecmascript::{
-    chunk::EcmascriptChunkPlaceablesVc, EcmascriptInputTransformsVc, EcmascriptModuleAssetType,
-    EcmascriptModuleAssetVc,
+    EcmascriptInputTransformsVc, EcmascriptModuleAssetType, EcmascriptModuleAssetVc,
 };
 <span class="kw">use </span>turbopack_node::{
     evaluate::{evaluate, JavaScriptValue},
@@ -686,7 +707,7 @@
     server_runtime_config: IndexMap&lt;String, serde_json::Value&gt;,
     static_page_generation_timeout: f64,
     swc_minify: bool,
-    target: String,
+    target: <span class="prelude-ty">Option</span>&lt;String&gt;,
     trailing_slash: bool,
     typescript: TypeScriptConfig,
     use_file_system_public_routes: bool,
@@ -1143,8 +1164,24 @@
 
 <span class="attr">#[turbo_tasks::function]
 </span><span class="kw">pub async fn </span>load_next_config(execution_context: ExecutionContextVc) -&gt; <span class="prelude-ty">Result</span>&lt;NextConfigVc&gt; {
+    <span class="kw">let </span>ExecutionContext { project_path, .. } = <span class="kw-2">*</span>execution_context.<span class="kw">await</span><span class="question-mark">?</span>;
+    <span class="kw">let </span>find_config_result = find_context_file(project_path, next_configs());
+    <span class="kw">let </span>config_file = <span class="kw">match </span><span class="kw-2">&amp;*</span>find_config_result.<span class="kw">await</span><span class="question-mark">? </span>{
+        FindContextFileResult::Found(config_path, <span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>config_path),
+        FindContextFileResult::NotFound(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+    };
+    load_next_config_internal(execution_context, config_file)
+        .issue_context(config_file, <span class="string">&quot;Loading Next.js config&quot;</span>)
+        .<span class="kw">await
+</span>}
+
+<span class="attr">#[turbo_tasks::function]
+</span><span class="kw">pub async fn </span>load_next_config_internal(
+    execution_context: ExecutionContextVc,
+    config_file: <span class="prelude-ty">Option</span>&lt;FileSystemPathVc&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;NextConfigVc&gt; {
     <span class="kw">let </span>ExecutionContext {
-        project_root,
+        project_path,
         intermediate_output_path,
         env,
     } = <span class="kw-2">*</span>execution_context.<span class="kw">await</span><span class="question-mark">?</span>;
@@ -1155,43 +1192,36 @@
     import_map.insert_exact_alias(<span class="string">&quot;styled-jsx&quot;</span>, ImportMapping::External(<span class="prelude-val">None</span>).into());
     import_map.insert_wildcard_alias(<span class="string">&quot;styled-jsx/&quot;</span>, ImportMapping::External(<span class="prelude-val">None</span>).into());
 
-    <span class="kw">let </span>context = node_evaluate_asset_context(<span class="prelude-val">Some</span>(import_map.cell()), <span class="prelude-val">None</span>);
-    <span class="kw">let </span>find_config_result = find_context_file(project_root, next_configs());
-    <span class="kw">let </span>config_asset = <span class="kw">match </span><span class="kw-2">&amp;*</span>find_config_result.<span class="kw">await</span><span class="question-mark">? </span>{
-        FindContextFileResult::Found(config_path, <span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(SourceAssetVc::new(<span class="kw-2">*</span>config_path)),
-        FindContextFileResult::NotFound(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-    };
+    <span class="kw">let </span>context = node_evaluate_asset_context(project_path, <span class="prelude-val">Some</span>(import_map.cell()), <span class="prelude-val">None</span>);
+    <span class="kw">let </span>config_asset = config_file.map(SourceAssetVc::new);
 
-    <span class="kw">let </span>runtime_entries = config_asset.map(|config_asset| {
-        <span class="comment">// TODO this is a hack to add the config to the bundling to make it watched
-        </span><span class="kw">let </span>config_chunk = EcmascriptModuleAssetVc::new(
+    <span class="kw">let </span>config_changed = config_asset.map_or_else(CompletionVc::immutable, |config_asset| {
+        <span class="comment">// This invalidates the execution when anything referenced by the config file
+        // changes
+        </span><span class="kw">let </span>config_asset = EcmascriptModuleAssetVc::new(
             config_asset.into(),
             context,
             Value::new(EcmascriptModuleAssetType::Ecmascript),
             EcmascriptInputTransformsVc::cell(<span class="macro">vec!</span>[]),
             context.compile_time_info(),
-        )
-        .as_ecmascript_chunk_placeable();
-        EcmascriptChunkPlaceablesVc::cell(<span class="macro">vec!</span>[config_chunk])
+        );
+        any_content_changed(config_asset.into())
     });
-    <span class="kw">let </span>asset_path = config_asset
-        .map_or(project_root, |a| a.path())
-        .join(<span class="string">&quot;load-next-config.js&quot;</span>);
     <span class="kw">let </span>load_next_config_asset = context.process(
-        next_asset(asset_path, <span class="string">&quot;entry/config/next.js&quot;</span>),
+        next_asset(<span class="string">&quot;entry/config/next.js&quot;</span>),
         Value::new(ReferenceType::Entry(EntryReferenceSubType::Undefined)),
     );
     <span class="kw">let </span>config_value = evaluate(
-        project_root,
+        project_path,
         load_next_config_asset,
-        project_root,
+        project_path,
         env,
-        config_asset.map_or(project_root, |c| c.path()),
+        config_asset.map_or_else(|| AssetIdentVc::from_path(project_path), |c| c.ident()),
         context,
         intermediate_output_path,
-        runtime_entries,
+        <span class="prelude-val">None</span>,
         <span class="macro">vec!</span>[],
-        CompletionVc::immutable(),
+        config_changed,
         <span class="comment">/* debug */ </span><span class="bool-val">false</span>,
     )
     .<span class="kw">await</span><span class="question-mark">?</span>;
@@ -1207,6 +1237,14 @@
             <span class="macro">unimplemented!</span>(<span class="string">&quot;Stream not supported now&quot;</span>);
         }
     }
+}
+
+<span class="attr">#[turbo_tasks::function]
+</span><span class="kw">pub async fn </span>has_next_config(context: FileSystemPathVc) -&gt; <span class="prelude-ty">Result</span>&lt;BoolVc&gt; {
+    <span class="prelude-val">Ok</span>(BoolVc::cell(!<span class="macro">matches!</span>(
+        <span class="kw-2">*</span>find_context_file(context, next_configs()).<span class="kw">await</span><span class="question-mark">?</span>,
+        FindContextFileResult::NotFound(<span class="kw">_</span>)
+    )))
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="next_core" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.67.0-nightly (215e3cd21 2022-11-03)" ></div></body></html>

@@ -383,10 +383,78 @@
 <span id="383">383</span>
 <span id="384">384</span>
 <span id="385">385</span>
-</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, collections::HashMap, thread::available_parallelism, time::Duration};
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, thread::available_parallelism, time::Duration};
 
-<span class="kw">use </span>anyhow::Result;
+<span class="kw">use </span>anyhow::{Context, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>futures_retry::{FutureRetry, RetryPolicy};
+<span class="kw">use </span>indexmap::indexmap;
 <span class="kw">use </span>turbo_tasks::{
     primitives::{JsonValueVc, StringVc},
     CompletionVc, TryJoinIterExt, Value, ValueToString,
@@ -399,6 +467,7 @@
     asset::{Asset, AssetVc},
     chunk::{dev::DevChunkingContextVc, ChunkGroupVc},
     context::{AssetContext, AssetContextVc},
+    ident::AssetIdentVc,
     issue::{Issue, IssueSeverity, IssueSeverityVc, IssueVc},
     source_asset::SourceAssetVc,
     virtual_asset::VirtualAssetVc,
@@ -457,17 +526,19 @@
     )
     .as_asset();
 
-    <span class="kw">let </span>module_path = module_asset.path().<span class="kw">await</span><span class="question-mark">?</span>;
+    <span class="kw">let </span>module_path = module_asset.ident().path().<span class="kw">await</span><span class="question-mark">?</span>;
     <span class="kw">let </span>file_name = module_path.file_name();
     <span class="kw">let </span>file_name = <span class="kw">if </span>file_name.ends_with(<span class="string">&quot;.js&quot;</span>) {
         Cow::Borrowed(file_name)
+    } <span class="kw">else if let </span><span class="prelude-val">Some</span>(file_name) = file_name.strip_suffix(<span class="string">&quot;.ts&quot;</span>) {
+        Cow::Owned(<span class="macro">format!</span>(<span class="string">&quot;{file_name}.js&quot;</span>))
     } <span class="kw">else </span>{
         Cow::Owned(<span class="macro">format!</span>(<span class="string">&quot;{file_name}.js&quot;</span>))
     };
     <span class="kw">let </span>path = intermediate_output_path.join(file_name.as_ref());
     <span class="kw">let </span>entry_module = EcmascriptModuleAssetVc::new_with_inner_assets(
         VirtualAssetVc::new(
-            runtime_asset.path().join(<span class="string">&quot;evaluate.js&quot;</span>),
+            runtime_asset.ident().path().join(<span class="string">&quot;evaluate.js&quot;</span>),
             File::from(
                 <span class="string">&quot;import { run } from &#39;RUNTIME&#39;; run((...args) =&gt; \
                  (require(&#39;INNER&#39;).default(...args)))&quot;</span>,
@@ -479,10 +550,10 @@
         Value::new(EcmascriptModuleAssetType::Typescript),
         EcmascriptInputTransformsVc::cell(<span class="macro">vec!</span>[EcmascriptInputTransform::TypeScript]),
         context.compile_time_info(),
-        InnerAssetsVc::cell(HashMap::from([
-            (<span class="string">&quot;INNER&quot;</span>.to_string(), module_asset),
-            (<span class="string">&quot;RUNTIME&quot;</span>.to_string(), runtime_asset),
-        ])),
+        InnerAssetsVc::cell(<span class="macro">indexmap! </span>{
+            <span class="string">&quot;INNER&quot;</span>.to_string() =&gt; module_asset,
+            <span class="string">&quot;RUNTIME&quot;</span>.to_string() =&gt; runtime_asset
+        }),
     );
 
     <span class="kw">let </span>(<span class="prelude-val">Some</span>(cwd), <span class="prelude-val">Some</span>(entrypoint)) = (to_sys_path(cwd).<span class="kw">await</span><span class="question-mark">?</span>, to_sys_path(path).<span class="kw">await</span><span class="question-mark">?</span>) <span class="kw">else </span>{
@@ -560,7 +631,7 @@
     module_asset: AssetVc,
     cwd: FileSystemPathVc,
     env: ProcessEnvVc,
-    context_path_for_issue: FileSystemPathVc,
+    context_ident_for_issue: AssetIdentVc,
     context: AssetContextVc,
     intermediate_output_path: FileSystemPathVc,
     runtime_entries: <span class="prelude-ty">Option</span>&lt;EcmascriptChunkPlaceablesVc&gt;,
@@ -610,7 +681,8 @@
             EvalJavaScriptIncomingMessage::Error(error) =&gt; {
                 EvaluationIssue {
                     error,
-                    context_path: context_path_for_issue,
+                    context_ident: context_ident_for_issue,
+                    cwd,
                 }
                 .cell()
                 .as_issue()
@@ -634,7 +706,7 @@
             EvalJavaScriptIncomingMessage::BuildDependency { path } =&gt; {
                 <span class="comment">// TODO We might miss some changes that happened during execution
                 </span>BuildDependencyIssue {
-                    context_path: context_path_for_issue,
+                    context_ident: context_ident_for_issue,
                     path: cwd.join(<span class="kw-2">&amp;</span>path),
                 }
                 .cell()
@@ -646,6 +718,17 @@
                 </span>dir_dependencies.push(dir_dependency(
                     cwd.join(<span class="kw-2">&amp;</span>path).read_glob(GlobVc::new(<span class="kw-2">&amp;</span>glob), <span class="bool-val">false</span>),
                 ));
+            }
+            EvalJavaScriptIncomingMessage::EmittedError { error, severity } =&gt; {
+                EvaluateEmittedErrorIssue {
+                    context: context_ident_for_issue.path(),
+                    cwd,
+                    error,
+                    severity: severity.cell(),
+                }
+                .cell()
+                .as_issue()
+                .emit();
             }
         }
     };
@@ -663,7 +746,8 @@
 <span class="doccomment">/// An issue that occurred while evaluating node code.
 </span><span class="attr">#[turbo_tasks::value(shared)]
 </span><span class="kw">pub struct </span>EvaluationIssue {
-    <span class="kw">pub </span>context_path: FileSystemPathVc,
+    <span class="kw">pub </span>context_ident: AssetIdentVc,
+    <span class="kw">pub </span>cwd: FileSystemPathVc,
     <span class="kw">pub </span>error: StructuredError,
 }
 
@@ -681,13 +765,19 @@
 
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">fn </span>context(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc {
-        <span class="self">self</span>.context_path
+        <span class="self">self</span>.context_ident.path()
     }
 
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">async fn </span>description(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;StringVc&gt; {
+        <span class="kw">let </span>cwd = to_sys_path(<span class="self">self</span>.cwd.root())
+            .<span class="kw">await</span><span class="question-mark">?
+            </span>.context(<span class="string">&quot;Must have path on disk&quot;</span>)<span class="question-mark">?</span>;
+
         <span class="prelude-val">Ok</span>(StringVc::cell(
-            <span class="self">self</span>.error.print(Default::default(), <span class="prelude-val">None</span>).<span class="kw">await</span><span class="question-mark">?</span>,
+            <span class="self">self</span>.error
+                .print(Default::default(), <span class="kw-2">&amp;</span>cwd.to_string_lossy())
+                .<span class="kw">await</span><span class="question-mark">?</span>,
         ))
     }
 }
@@ -695,7 +785,7 @@
 <span class="doccomment">/// An issue that occurred while evaluating node code.
 </span><span class="attr">#[turbo_tasks::value(shared)]
 </span><span class="kw">pub struct </span>BuildDependencyIssue {
-    <span class="kw">pub </span>context_path: FileSystemPathVc,
+    <span class="kw">pub </span>context_ident: AssetIdentVc,
     <span class="kw">pub </span>path: FileSystemPathVc,
 }
 
@@ -718,7 +808,7 @@
 
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">fn </span>context(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc {
-        <span class="self">self</span>.context_path
+        <span class="self">self</span>.context_ident.path()
     }
 
     <span class="attr">#[turbo_tasks::function]
@@ -752,7 +842,7 @@ Changing this file or any dependency will not be recognized and might require re
         <span class="comment">// Reading all files to add itself as dependency
         </span><span class="kw">match </span><span class="kw-2">*</span>item {
             DirectoryEntry::File(file) =&gt; {
-                file.read().<span class="kw">await</span><span class="question-mark">?</span>;
+                file.track().<span class="kw">await</span><span class="question-mark">?</span>;
             }
             DirectoryEntry::Directory(dir) =&gt; {
                 dir_dependency(dir.read_glob(GlobVc::new(<span class="string">&quot;**&quot;</span>), <span class="bool-val">false</span>)).<span class="kw">await</span><span class="question-mark">?</span>;
@@ -767,6 +857,50 @@ Changing this file or any dependency will not be recognized and might require re
         }
     }
     <span class="prelude-val">Ok</span>(CompletionVc::new())
+}
+
+<span class="attr">#[turbo_tasks::value(shared)]
+</span><span class="kw">pub struct </span>EvaluateEmittedErrorIssue {
+    <span class="kw">pub </span>context: FileSystemPathVc,
+    <span class="kw">pub </span>cwd: FileSystemPathVc,
+    <span class="kw">pub </span>severity: IssueSeverityVc,
+    <span class="kw">pub </span>error: StructuredError,
+}
+
+<span class="attr">#[turbo_tasks::value_impl]
+</span><span class="kw">impl </span>Issue <span class="kw">for </span>EvaluateEmittedErrorIssue {
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">fn </span>context(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc {
+        <span class="self">self</span>.context
+    }
+
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">fn </span>severity(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; IssueSeverityVc {
+        <span class="self">self</span>.severity
+    }
+
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">fn </span>category(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; StringVc {
+        StringVc::cell(<span class="string">&quot;loaders&quot;</span>.to_string())
+    }
+
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">fn </span>title(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; StringVc {
+        StringVc::cell(<span class="string">&quot;Issue while running loader&quot;</span>.to_string())
+    }
+
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">async fn </span>description(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;StringVc&gt; {
+        <span class="kw">let </span>root = to_sys_path(<span class="self">self</span>.cwd.root())
+            .<span class="kw">await</span><span class="question-mark">?
+            </span>.context(<span class="string">&quot;Must have path on disk&quot;</span>)<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>(StringVc::cell(
+            <span class="self">self</span>.error
+                .print(Default::default(), <span class="kw-2">&amp;</span>root.to_string_lossy())
+                .<span class="kw">await</span><span class="question-mark">?</span>,
+        ))
+    }
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="turbopack_node" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.67.0-nightly (215e3cd21 2022-11-03)" ></div></body></html>

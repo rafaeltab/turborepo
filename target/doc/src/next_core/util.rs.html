@@ -247,15 +247,115 @@
 <span id="247">247</span>
 <span id="248">248</span>
 <span id="249">249</span>
-</pre><pre class="rust"><code><span class="kw">use </span>anyhow::{anyhow, bail, <span class="prelude-ty">Result</span>};
-<span class="kw">use </span>serde::{Deserialize, Serialize};
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+</pre><pre class="rust"><code><span class="kw">use </span>anyhow::{anyhow, bail, Context, <span class="prelude-ty">Result</span>};
+<span class="kw">use </span>serde::{de::DeserializeOwned, Deserialize, Serialize};
 <span class="kw">use </span>swc_core::ecma::ast::Program;
-<span class="kw">use </span>turbo_tasks::{primitives::StringVc, trace::TraceRawVcs, ValueToString};
-<span class="kw">use </span>turbo_tasks_fs::FileSystemPathVc;
+<span class="kw">use </span>turbo_tasks::{primitives::StringVc, trace::TraceRawVcs, Value, ValueToString};
+<span class="kw">use </span>turbo_tasks_fs::{json::parse_json_rope_with_source_context, FileContent, FileSystemPathVc};
 <span class="kw">use </span>turbopack::condition::ContextCondition;
 <span class="kw">use </span>turbopack_core::{
     asset::{Asset, AssetVc},
+    ident::AssetIdentVc,
     issue::{Issue, IssueSeverity, IssueSeverityVc, IssueVc},
+    reference_type::{EcmaScriptModulesReferenceSubType, ReferenceType},
+    resolve::{
+        <span class="self">self</span>, handle_resolve_error, node::node_cjs_resolve_options, parse::RequestVc,
+        pattern::QueryMapVc, PrimaryResolveResult,
+    },
 };
 <span class="kw">use </span>turbopack_ecmascript::{
     analyzer::{JsValue, ObjectPart},
@@ -338,12 +438,23 @@
 #[derive(Default)]
 </span><span class="kw">pub struct </span>NextSourceConfig {
     <span class="kw">pub </span>runtime: NextRuntime,
+
+    <span class="doccomment">/// Middleware router matchers
+    </span><span class="kw">pub </span>matcher: <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt;,
+}
+
+<span class="attr">#[turbo_tasks::value_impl]
+</span><span class="kw">impl </span>NextSourceConfigVc {
+    <span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">pub fn </span>default() -&gt; <span class="self">Self </span>{
+        NextSourceConfig::default().cell()
+    }
 }
 
 <span class="doccomment">/// An issue that occurred while resolving the React Refresh runtime module.
 </span><span class="attr">#[turbo_tasks::value(shared)]
 </span><span class="kw">pub struct </span>NextSourceConfigParsingIssue {
-    path: FileSystemPathVc,
+    ident: AssetIdentVc,
     detail: StringVc,
 }
 
@@ -366,7 +477,7 @@
 
     <span class="attr">#[turbo_tasks::function]
     </span><span class="kw">fn </span>context(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc {
-        <span class="self">self</span>.path
+        <span class="self">self</span>.ident.path()
     }
 
     <span class="attr">#[turbo_tasks::function]
@@ -411,7 +522,7 @@
                                 <span class="kw">return </span><span class="prelude-val">Ok</span>(parse_config_from_js_value(module_asset, <span class="kw-2">&amp;</span>value).cell());
                             } <span class="kw">else </span>{
                                 NextSourceConfigParsingIssue {
-                                    path: module_asset.path(),
+                                    ident: module_asset.ident(),
                                     detail: StringVc::cell(
                                         <span class="string">&quot;The exported config object must contain an variable \
                                          initializer.&quot;
@@ -428,7 +539,7 @@
             }
         }
     }
-    <span class="prelude-val">Ok</span>(NextSourceConfig::default().cell())
+    <span class="prelude-val">Ok</span>(NextSourceConfigVc::default())
 }
 
 <span class="kw">fn </span>parse_config_from_js_value(module_asset: AssetVc, value: <span class="kw-2">&amp;</span>JsValue) -&gt; NextSourceConfig {
@@ -436,7 +547,7 @@
     <span class="kw">let </span>invalid_config = |detail: <span class="kw-2">&amp;</span>str, value: <span class="kw-2">&amp;</span>JsValue| {
         <span class="kw">let </span>(explainer, hints) = value.explain(<span class="number">2</span>, <span class="number">0</span>);
         NextSourceConfigParsingIssue {
-            path: module_asset.path(),
+            ident: module_asset.ident(),
             detail: StringVc::cell(<span class="macro">format!</span>(<span class="string">&quot;{detail} Got {explainer}.{hints}&quot;</span>)),
         }
         .cell()
@@ -478,6 +589,40 @@
                                 );
                             }
                         }
+                        <span class="kw">if </span>key == <span class="string">&quot;matcher&quot; </span>{
+                            <span class="kw">let </span><span class="kw-2">mut </span>matchers = <span class="macro">vec!</span>[];
+                            <span class="kw">match </span>value {
+                                JsValue::Constant(matcher) =&gt; {
+                                    <span class="kw">if let </span><span class="prelude-val">Some</span>(matcher) = matcher.as_str() {
+                                        matchers.push(matcher.to_string());
+                                    } <span class="kw">else </span>{
+                                        invalid_config(
+                                            <span class="string">&quot;The matcher property must be a string or array of \
+                                             strings&quot;</span>,
+                                            value,
+                                        );
+                                    }
+                                }
+                                JsValue::Array { items, .. } =&gt; {
+                                    <span class="kw">for </span>item <span class="kw">in </span>items {
+                                        <span class="kw">if let </span><span class="prelude-val">Some</span>(matcher) = item.as_str() {
+                                            matchers.push(matcher.to_string());
+                                        } <span class="kw">else </span>{
+                                            invalid_config(
+                                                <span class="string">&quot;The matcher property must be a string or array \
+                                                 of strings&quot;</span>,
+                                                value,
+                                            );
+                                        }
+                                    }
+                                }
+                                <span class="kw">_ </span>=&gt; invalid_config(
+                                    <span class="string">&quot;The matcher property must be a string or array of strings&quot;</span>,
+                                    value,
+                                ),
+                            }
+                            config.matcher = <span class="prelude-val">Some</span>(matchers);
+                        }
                     } <span class="kw">else </span>{
                         invalid_config(
                             <span class="string">&quot;The exported config object must not contain non-constant strings.&quot;</span>,
@@ -495,6 +640,49 @@
     }
 
     config
+}
+
+<span class="kw">pub async fn </span>load_next_json&lt;T: DeserializeOwned&gt;(
+    context: FileSystemPathVc,
+    path: <span class="kw-2">&amp;</span>str,
+) -&gt; <span class="prelude-ty">Result</span>&lt;T&gt; {
+    <span class="kw">let </span>request = RequestVc::module(
+        <span class="string">&quot;next&quot;</span>.to_owned(),
+        Value::new(path.to_string().into()),
+        QueryMapVc::cell(<span class="prelude-val">None</span>),
+    );
+    <span class="kw">let </span>resolve_options = node_cjs_resolve_options(context.root());
+
+    <span class="kw">let </span>resolve_result = handle_resolve_error(
+        resolve::resolve(context, request, resolve_options),
+        Value::new(ReferenceType::EcmaScriptModules(
+            EcmaScriptModulesReferenceSubType::Undefined,
+        )),
+        context,
+        request,
+        resolve_options,
+    )
+    .<span class="kw">await</span><span class="question-mark">?</span>;
+    <span class="kw">let </span>resolve_result = <span class="kw-2">&amp;*</span>resolve_result.<span class="kw">await</span><span class="question-mark">?</span>;
+
+    <span class="kw">let </span>primary = resolve_result
+        .primary
+        .first()
+        .context(<span class="string">&quot;Unable to resolve primary asset&quot;</span>)<span class="question-mark">?</span>;
+
+    <span class="kw">let </span>PrimaryResolveResult::Asset(metrics_asset) = primary <span class="kw">else </span>{
+        <span class="macro">bail!</span>(<span class="string">&quot;Expected to find asset&quot;</span>);
+    };
+
+    <span class="kw">let </span>content = <span class="kw-2">&amp;*</span>metrics_asset.content().file_content().<span class="kw">await</span><span class="question-mark">?</span>;
+
+    <span class="kw">let </span>FileContent::Content(file) = content <span class="kw">else </span>{
+        <span class="macro">bail!</span>(<span class="string">&quot;Expected file content for metrics data&quot;</span>);
+    };
+
+    <span class="kw">let </span>result: T = parse_json_rope_with_source_context(file.content())<span class="question-mark">?</span>;
+
+    <span class="prelude-val">Ok</span>(result)
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="next_core" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.67.0-nightly (215e3cd21 2022-11-03)" ></div></body></html>

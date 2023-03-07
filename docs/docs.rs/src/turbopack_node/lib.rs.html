@@ -343,6 +343,43 @@
 <span id="343">343</span>
 <span id="344">344</span>
 <span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
 </pre><pre class="rust"><code><span class="attr">#![feature(async_closure)]
 #![feature(min_specialization)]
 #![feature(lint_reasons)]
@@ -351,6 +388,7 @@
     collections::{HashMap, HashSet},
     fmt::Write <span class="kw">as _</span>,
     path::PathBuf,
+    thread::available_parallelism,
 };
 
 <span class="kw">use </span>anyhow::{bail, <span class="prelude-ty">Result</span>};
@@ -362,10 +400,13 @@
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>serde_json::Value <span class="kw">as </span>JsonValue;
 <span class="kw">use </span>turbo_tasks::{CompletionVc, CompletionsVc, TryJoinIterExt, ValueToString};
+<span class="kw">use </span>turbo_tasks_env::{ProcessEnv, ProcessEnvVc};
 <span class="kw">use </span>turbo_tasks_fs::{to_sys_path, File, FileContent, FileSystemPathVc};
+<span class="kw">use </span>turbo_tasks_hash::{encode_hex, hash_xxh3_hash64};
 <span class="kw">use </span>turbopack_core::{
     asset::{Asset, AssetVc, AssetsSetVc},
     chunk::{ChunkGroupVc, ChunkVc, ChunkingContextVc},
+    issue::IssueSeverity,
     reference::AssetReference,
     source_map::{GenerateSourceMap, GenerateSourceMapVc, SourceMapVc},
     virtual_asset::VirtualAssetVc,
@@ -400,8 +441,8 @@
             .<span class="kw">await</span><span class="question-mark">?
             </span>.iter()
             .map(|a| <span class="kw">async </span>{
-                <span class="prelude-val">Ok</span>(<span class="kw">if </span><span class="kw-2">*</span>a.path().extension().<span class="kw">await</span><span class="question-mark">? </span>!= <span class="string">&quot;map&quot; </span>{
-                    <span class="prelude-val">Some</span>(a.content().write(a.path()))
+                <span class="prelude-val">Ok</span>(<span class="kw">if </span><span class="kw-2">*</span>a.ident().path().extension().<span class="kw">await</span><span class="question-mark">? </span>!= <span class="string">&quot;map&quot; </span>{
+                    <span class="prelude-val">Some</span>(a.content().write(a.ident().path()))
                 } <span class="kw">else </span>{
                     <span class="prelude-val">None
                 </span>})
@@ -412,7 +453,7 @@
             .flatten()
             .collect(),
     )
-    .all())
+    .completed())
 }
 
 <span class="doccomment">/// List of the all assets of the &quot;internal&quot; subgraph and a list of boundary
@@ -483,7 +524,12 @@
             // others as &quot;external&quot;. We follow references on &quot;internal&quot; assets, but do not
             // look into references of &quot;external&quot; assets, since there are no &quot;internal&quot;
             // assets behind &quot;externals&quot;
-            </span><span class="kw">if </span>asset.path().<span class="kw">await</span><span class="question-mark">?</span>.is_inside(intermediate_output_path) {
+            </span><span class="kw">if </span>asset
+                .ident()
+                .path()
+                .<span class="kw">await</span><span class="question-mark">?
+                </span>.is_inside(intermediate_output_path)
+            {
                 <span class="kw">let </span><span class="kw-2">mut </span>assets = Vec::new();
                 <span class="kw">for </span>reference <span class="kw">in </span>asset.references().<span class="kw">await</span><span class="question-mark">?</span>.iter() {
                     <span class="kw">for </span>asset <span class="kw">in </span>reference.resolve_reference().primary_assets().<span class="kw">await</span><span class="question-mark">?</span>.iter() {
@@ -528,6 +574,7 @@
 </span><span class="attr">#[turbo_tasks::function]
 </span><span class="kw">pub async fn </span>get_renderer_pool(
     cwd: FileSystemPathVc,
+    env: ProcessEnvVc,
     intermediate_asset: AssetVc,
     intermediate_output_path: FileSystemPathVc,
     output_root: FileSystemPathVc,
@@ -551,7 +598,7 @@
 
     emit(intermediate_asset, output_root).<span class="kw">await</span><span class="question-mark">?</span>;
 
-    <span class="kw">let </span>entrypoint = intermediate_output_path.join(<span class="string">&quot;index.js&quot;</span>);
+    <span class="kw">let </span>entrypoint = intermediate_asset.ident().path();
 
     <span class="kw">let </span><span class="prelude-val">Some</span>(cwd) = to_sys_path(cwd).<span class="kw">await</span><span class="question-mark">? </span><span class="kw">else </span>{
         <span class="macro">bail!</span>(<span class="string">&quot;can only render from a disk filesystem, but `cwd = {}`&quot;</span>, cwd.fs().to_string().<span class="kw">await</span><span class="question-mark">?</span>);
@@ -560,7 +607,18 @@
         <span class="macro">bail!</span>(<span class="string">&quot;can only render from a disk filesystem, but `entrypoint = {}`&quot;</span>, entrypoint.fs().to_string().<span class="kw">await</span><span class="question-mark">?</span>);
     };
 
-    <span class="prelude-val">Ok</span>(NodeJsPool::new(cwd, entrypoint, HashMap::new(), <span class="number">4</span>, debug).cell())
+    <span class="prelude-val">Ok</span>(NodeJsPool::new(
+        cwd,
+        entrypoint,
+        env.read_all()
+            .<span class="kw">await</span><span class="question-mark">?
+            </span>.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        available_parallelism().map_or(<span class="number">1</span>, |v| v.get()),
+        debug,
+    )
+    .cell())
 }
 
 <span class="doccomment">/// Converts a module graph into node.js executable assets
@@ -570,8 +628,12 @@
     intermediate_output_path: FileSystemPathVc,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;AssetVc&gt; {
     <span class="kw">let </span>chunk_group = ChunkGroupVc::from_chunk(entry_chunk);
+    <span class="kw">let </span><span class="kw-2">mut </span>hash = encode_hex(hash_xxh3_hash64(
+        entry_chunk.ident().path().to_string().<span class="kw">await</span><span class="question-mark">?</span>.as_str(),
+    ));
+    hash.push_str(<span class="string">&quot;.js&quot;</span>);
     <span class="prelude-val">Ok</span>(NodeJsBootstrapAsset {
-        path: intermediate_output_path.join(<span class="string">&quot;index.js&quot;</span>),
+        path: intermediate_output_path.join(<span class="kw-2">&amp;</span>hash),
         chunk_group,
     }
     .cell()
@@ -594,10 +656,23 @@
 <span class="attr">#[derive(Deserialize)]
 #[serde(tag = <span class="string">&quot;type&quot;</span>, rename_all = <span class="string">&quot;camelCase&quot;</span>)]
 </span><span class="kw">enum </span>EvalJavaScriptIncomingMessage {
-    FileDependency { path: String },
-    BuildDependency { path: String },
-    DirDependency { path: String, glob: String },
-    JsonValue { data: String },
+    FileDependency {
+        path: String,
+    },
+    BuildDependency {
+        path: String,
+    },
+    DirDependency {
+        path: String,
+        glob: String,
+    },
+    JsonValue {
+        data: String,
+    },
+    EmittedError {
+        severity: IssueSeverity,
+        error: StructuredError,
+    },
     Error(StructuredError),
 }
 
@@ -609,18 +684,17 @@
 }
 
 <span class="kw">impl </span>StructuredError {
-    <span class="kw">async fn </span>print(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        assets: HashMap&lt;String, SourceMapVc&gt;,
-        root: <span class="prelude-ty">Option</span>&lt;String&gt;,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;String&gt; {
+    <span class="kw">async fn </span>print(<span class="kw-2">&amp;</span><span class="self">self</span>, assets: HashMap&lt;String, SourceMapVc&gt;, root: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;String&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>message = String::new();
 
         <span class="macro">writeln!</span>(message, <span class="string">&quot;{}: {}&quot;</span>, <span class="self">self</span>.name, <span class="self">self</span>.message)<span class="question-mark">?</span>;
 
         <span class="kw">for </span>frame <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.stack {
             <span class="kw">if let </span><span class="prelude-val">Some</span>((line, column)) = frame.get_pos() {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(path) = root.as_ref().and_then(|r| frame.file.strip_prefix(r)) {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(path) = frame.file.strip_prefix(
+                    <span class="comment">// Add a trailing slash so paths don&#39;t lead with `/`.
+                    </span><span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">&quot;{}{}&quot;</span>, root, std::path::MAIN_SEPARATOR),
+                ) {
                     <span class="kw">if let </span><span class="prelude-val">Some</span>(map) = assets.get(path) {
                         <span class="kw">let </span>trace = SourceMapTraceVc::new(<span class="kw-2">*</span>map, line, column, frame.name.clone())
                             .trace()
@@ -661,9 +735,9 @@
                 <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
             };
 
-            <span class="kw">let </span>path = <span class="kw">match </span>to_sys_path(a.path()).<span class="kw">await</span><span class="question-mark">? </span>{
+            <span class="kw">let </span>path = <span class="kw">match </span>to_sys_path(a.ident().path()).<span class="kw">await</span><span class="question-mark">? </span>{
                 <span class="prelude-val">Some</span>(p) =&gt; p,
-                <span class="prelude-val">None </span>=&gt; PathBuf::from(<span class="kw-2">&amp;</span>a.path().<span class="kw">await</span><span class="question-mark">?</span>.path),
+                <span class="prelude-val">None </span>=&gt; PathBuf::from(<span class="kw-2">&amp;</span>a.ident().path().<span class="kw">await</span><span class="question-mark">?</span>.path),
             };
 
             <span class="kw">let </span>p = path.strip_prefix(<span class="kw-2">&amp;</span>root).unwrap();
@@ -678,7 +752,7 @@
         .flatten()
         .collect::&lt;HashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;();
 
-    error.print(assets, <span class="prelude-val">Some</span>(root)).<span class="kw">await
+    error.print(assets, <span class="kw-2">&amp;</span>root).<span class="kw">await
 </span>}
 
 <span class="kw">pub fn </span>register() {
