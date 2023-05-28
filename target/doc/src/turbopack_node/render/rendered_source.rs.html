@@ -297,9 +297,24 @@
 <a href="#297" id="297">297</a>
 <a href="#298" id="298">298</a>
 <a href="#299" id="299">299</a>
+<a href="#300" id="300">300</a>
+<a href="#301" id="301">301</a>
+<a href="#302" id="302">302</a>
+<a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
+<a href="#305" id="305">305</a>
+<a href="#306" id="306">306</a>
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a>
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a>
+<a href="#311" id="311">311</a>
 </pre><pre class="rust"><code><span class="kw">use </span>anyhow::{anyhow, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>indexmap::IndexSet;
-<span class="kw">use </span>turbo_tasks::{primitives::StringVc, Value};
+<span class="kw">use </span>turbo_tasks::{
+    primitives::{JsonValueVc, StringVc},
+    Value,
+};
 <span class="kw">use </span>turbo_tasks_env::ProcessEnvVc;
 <span class="kw">use </span>turbo_tasks_fs::FileSystemPathVc;
 <span class="kw">use </span>turbopack_core::{
@@ -350,6 +365,7 @@
     pathname: StringVc,
     entry: NodeEntryVc,
     fallback_page: DevHtmlAssetVc,
+    render_data: JsonValueVc,
 ) -&gt; ContentSourceVc {
     <span class="kw">let </span>source = NodeRenderContentSource {
         cwd,
@@ -360,6 +376,7 @@
         pathname,
         entry,
         fallback_page,
+        render_data,
     }
     .cell();
     ConditionalContentSourceVc::new(
@@ -384,6 +401,7 @@
     pathname: StringVc,
     entry: NodeEntryVc,
     fallback_page: DevHtmlAssetVc,
+    render_data: JsonValueVc,
 }
 
 <span class="attr">#[turbo_tasks::value_impl]
@@ -453,6 +471,7 @@
                 specificity: this.specificity,
                 get_content: NodeRenderGetContentResult {
                     source: self_vc,
+                    render_data: this.render_data,
                     path: path.to_string(),
                 }
                 .cell()
@@ -467,6 +486,7 @@
 <span class="attr">#[turbo_tasks::value]
 </span><span class="kw">struct </span>NodeRenderGetContentResult {
     source: NodeRenderContentSourceVc,
+    render_data: JsonValueVc,
     path: String,
 }
 
@@ -477,6 +497,7 @@
         ContentSourceDataVary {
             method: <span class="bool-val">true</span>,
             url: <span class="bool-val">true</span>,
+            original_url: <span class="bool-val">true</span>,
             raw_headers: <span class="bool-val">true</span>,
             raw_query: <span class="bool-val">true</span>,
             ..Default::default()
@@ -493,6 +514,7 @@
         <span class="kw">let </span>ContentSourceData {
             method: <span class="prelude-val">Some</span>(method),
             url: <span class="prelude-val">Some</span>(url),
+            original_url: <span class="prelude-val">Some</span>(original_url),
             raw_headers: <span class="prelude-val">Some</span>(raw_headers),
             raw_query: <span class="prelude-val">Some</span>(raw_query),
             ..
@@ -515,15 +537,17 @@
                 params: params.clone(),
                 method: method.clone(),
                 url: url.clone(),
+                original_url: original_url.clone(),
                 raw_query: raw_query.clone(),
                 raw_headers: raw_headers.clone(),
-                path: <span class="macro">format!</span>(<span class="string">&quot;/{}&quot;</span>, source.pathname.<span class="kw">await</span><span class="question-mark">?</span>),
+                path: source.pathname.<span class="kw">await</span><span class="question-mark">?</span>.clone_value(),
+                data: <span class="prelude-val">Some</span>(<span class="self">self</span>.render_data.<span class="kw">await</span><span class="question-mark">?</span>),
             }
             .cell(),
         )
         .issue_context(
             entry.module.ident().path(),
-            <span class="macro">format!</span>(<span class="string">&quot;server-side rendering /{}&quot;</span>, source.pathname.<span class="kw">await</span><span class="question-mark">?</span>),
+            <span class="macro">format!</span>(<span class="string">&quot;server-side rendering {}&quot;</span>, source.pathname.<span class="kw">await</span><span class="question-mark">?</span>),
         )
         .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="kw">match </span><span class="kw-2">*</span>result.<span class="kw">await</span><span class="question-mark">? </span>{
@@ -588,7 +612,7 @@
                 StringVc::cell(<span class="string">&quot;intermediate asset&quot;</span>.to_string()),
                 IntrospectableAssetVc::new(get_intermediate_asset(
                     entry.chunking_context,
-                    entry.module.into(),
+                    entry.module,
                     entry.runtime_entries,
                 )),
             ));

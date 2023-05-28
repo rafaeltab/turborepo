@@ -215,6 +215,15 @@
 <a href="#215" id="215">215</a>
 <a href="#216" id="216">216</a>
 <a href="#217" id="217">217</a>
+<a href="#218" id="218">218</a>
+<a href="#219" id="219">219</a>
+<a href="#220" id="220">220</a>
+<a href="#221" id="221">221</a>
+<a href="#222" id="222">222</a>
+<a href="#223" id="223">223</a>
+<a href="#224" id="224">224</a>
+<a href="#225" id="225">225</a>
+<a href="#226" id="226">226</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::io::{Error, ErrorKind};
 
 <span class="kw">use </span>anyhow::{anyhow, <span class="prelude-ty">Result</span>};
@@ -232,10 +241,13 @@
 <span class="kw">use </span>turbo_tasks_fs::{FileContent, FileContentReadRef};
 <span class="kw">use </span>turbopack_core::{asset::AssetContent, issue::IssueReporterVc, version::VersionedContent};
 
-<span class="kw">use </span><span class="kw">crate</span>::source::{
-    request::SourceRequest,
-    resolve::{resolve_source_request, ResolveSourceRequestResult},
-    Body, ContentSourceVc, HeaderListReadRef, ProxyResultReadRef,
+<span class="kw">use crate</span>::{
+    handle_issues,
+    source::{
+        request::SourceRequest,
+        resolve::{resolve_source_request, ResolveSourceRequestResult},
+        Body, ContentSourceVc, HeaderListReadRef, ProxyResultReadRef,
+    },
 };
 
 <span class="attr">#[turbo_tasks::value(serialization = <span class="string">&quot;none&quot;</span>)]
@@ -256,30 +268,27 @@
 </span><span class="kw">async fn </span>get_from_source(
     source: ContentSourceVc,
     request: TransientInstance&lt;SourceRequest&gt;,
-    issue_repoter: IssueReporterVc,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;GetFromSourceResultVc&gt; {
-    <span class="prelude-val">Ok</span>(
-        <span class="kw">match </span><span class="kw-2">&amp;*</span>resolve_source_request(source, request, issue_repoter).<span class="kw">await</span><span class="question-mark">? </span>{
-            ResolveSourceRequestResult::Static(static_content_vc, header_overwrites) =&gt; {
-                <span class="kw">let </span>static_content = static_content_vc.<span class="kw">await</span><span class="question-mark">?</span>;
-                <span class="kw">if let </span>AssetContent::File(file) = <span class="kw-2">&amp;*</span>static_content.content.content().<span class="kw">await</span><span class="question-mark">? </span>{
-                    GetFromSourceResult::Static {
-                        content: file.<span class="kw">await</span><span class="question-mark">?</span>,
-                        status_code: static_content.status_code,
-                        headers: static_content.headers.<span class="kw">await</span><span class="question-mark">?</span>,
-                        header_overwrites: header_overwrites.<span class="kw">await</span><span class="question-mark">?</span>,
-                    }
-                } <span class="kw">else </span>{
-                    GetFromSourceResult::NotFound
+    <span class="prelude-val">Ok</span>(<span class="kw">match </span><span class="kw-2">&amp;*</span>resolve_source_request(source, request).<span class="kw">await</span><span class="question-mark">? </span>{
+        ResolveSourceRequestResult::Static(static_content_vc, header_overwrites) =&gt; {
+            <span class="kw">let </span>static_content = static_content_vc.<span class="kw">await</span><span class="question-mark">?</span>;
+            <span class="kw">if let </span>AssetContent::File(file) = <span class="kw-2">&amp;*</span>static_content.content.content().<span class="kw">await</span><span class="question-mark">? </span>{
+                GetFromSourceResult::Static {
+                    content: file.<span class="kw">await</span><span class="question-mark">?</span>,
+                    status_code: static_content.status_code,
+                    headers: static_content.headers.<span class="kw">await</span><span class="question-mark">?</span>,
+                    header_overwrites: header_overwrites.<span class="kw">await</span><span class="question-mark">?</span>,
                 }
+            } <span class="kw">else </span>{
+                GetFromSourceResult::NotFound
             }
-            ResolveSourceRequestResult::HttpProxy(proxy) =&gt; {
-                GetFromSourceResult::HttpProxy(proxy.<span class="kw">await</span><span class="question-mark">?</span>)
-            }
-            ResolveSourceRequestResult::NotFound =&gt; GetFromSourceResult::NotFound,
         }
-        .cell(),
-    )
+        ResolveSourceRequestResult::HttpProxy(proxy) =&gt; {
+            GetFromSourceResult::HttpProxy(proxy.<span class="kw">await</span><span class="question-mark">?</span>)
+        }
+        ResolveSourceRequestResult::NotFound =&gt; GetFromSourceResult::NotFound,
+    }
+    .cell())
 }
 
 <span class="doccomment">/// Processes an HTTP request within a given content source and returns the
@@ -291,7 +300,8 @@
 ) -&gt; <span class="prelude-ty">Result</span>&lt;Response&lt;hyper::Body&gt;&gt; {
     <span class="kw">let </span>original_path = request.uri().path().to_string();
     <span class="kw">let </span>request = http_request_to_source_request(request).<span class="kw">await</span><span class="question-mark">?</span>;
-    <span class="kw">let </span>result = get_from_source(source, TransientInstance::new(request), issue_reporter);
+    <span class="kw">let </span>result = get_from_source(source, TransientInstance::new(request));
+    handle_issues(result, <span class="kw-2">&amp;</span>original_path, <span class="string">&quot;get_from_source&quot;</span>, issue_reporter).<span class="kw">await</span><span class="question-mark">?</span>;
     <span class="kw">match </span><span class="kw-2">&amp;*</span>result.strongly_consistent().<span class="kw">await</span><span class="question-mark">? </span>{
         GetFromSourceResult::Static {
             content,
@@ -359,6 +369,14 @@
                             guess.to_string()
                         },
                     )<span class="question-mark">?</span>);
+                }
+
+                <span class="kw">if </span>!header_map.contains_key(<span class="string">&quot;cache-control&quot;</span>) {
+                    <span class="comment">// The dev server contents might change at any time, we can&#39;t cache them.
+                    </span>header_map.append(
+                        <span class="string">&quot;cache-control&quot;</span>,
+                        hyper::header::HeaderValue::try_from(<span class="string">&quot;must-revalidate&quot;</span>)<span class="question-mark">?</span>,
+                    );
                 }
 
                 <span class="kw">let </span>content = file.content();

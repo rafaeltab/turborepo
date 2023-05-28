@@ -1957,12 +1957,14 @@
 <a href="#1957" id="1957">1957</a>
 <a href="#1958" id="1958">1958</a>
 <a href="#1959" id="1959">1959</a>
+<a href="#1960" id="1960">1960</a>
+<a href="#1961" id="1961">1961</a>
+<a href="#1962" id="1962">1962</a>
 </pre><pre class="rust"><code><span class="attr">#![feature(trivial_bounds)]
 #![feature(hash_drain_filter)]
 #![feature(min_specialization)]
 #![feature(iter_advance_by)]
 #![feature(io_error_more)]
-#![feature(box_syntax)]
 #![feature(round_char_boundary)]
 
 </span><span class="kw">pub mod </span>attach;
@@ -2011,6 +2013,7 @@
     fs,
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
 };
+<span class="kw">use </span>tracing::{instrument, Level};
 <span class="kw">use </span>turbo_tasks::{
     mark_stateful,
     primitives::{BoolVc, StringReadRef, StringVc},
@@ -2316,7 +2319,8 @@
                     }
                     event = rx.try_recv();
                 }
-                <span class="kw">fn </span>invalidate(
+                <span class="attr">#[instrument(parent = <span class="prelude-val">None</span>, level = Level::INFO, name = <span class="string">&quot;DiskFileSystem file change&quot;</span>, skip_all, fields(name = display(path.display())))]
+                </span><span class="kw">fn </span>invalidate(
                     report_invalidation_reason: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;(String, PathBuf)&gt;,
                     path: <span class="kw-2">&amp;</span>Path,
                     invalidator: Invalidator,
@@ -2832,7 +2836,10 @@
         <span class="self">self</span>.path.is_empty()
     }
 
-    <span class="kw">pub fn </span>get_path_to&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, inner: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FileSystemPath) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str&gt; {
+    <span class="doccomment">/// Returns the path of `inner` relative to `self`.
+    ///
+    /// Note: this method always strips the leading `/` from the result.
+    </span><span class="kw">pub fn </span>get_path_to&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, inner: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>FileSystemPath) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str&gt; {
         <span class="kw">if </span><span class="self">self</span>.fs != inner.fs {
             <span class="kw">return </span><span class="prelude-val">None</span>;
         }
@@ -3642,9 +3649,9 @@
                 <span class="kw">let </span>de = <span class="kw-2">&amp;mut </span>serde_json::Deserializer::from_reader(file.read());
                 <span class="kw">match </span>serde_path_to_error::deserialize(de) {
                     <span class="prelude-val">Ok</span>(data) =&gt; FileJsonContent::Content(data),
-                    <span class="prelude-val">Err</span>(e) =&gt; FileJsonContent::Unparseable(
-                        <span class="kw">box </span>UnparseableJson::from_serde_path_to_error(e),
-                    ),
+                    <span class="prelude-val">Err</span>(e) =&gt; FileJsonContent::Unparseable(Box::new(
+                        UnparseableJson::from_serde_path_to_error(e),
+                    )),
                 }
             }
             FileContent::NotFound =&gt; FileJsonContent::NotFound,
@@ -3668,9 +3675,8 @@
                             <span class="string">&quot;text content doesn&#39;t contain any json data&quot;</span>,
                         ),
                     },
-                    <span class="prelude-val">Err</span>(e) =&gt; FileJsonContent::Unparseable(<span class="kw">box </span>UnparseableJson::from_jsonc_error(
-                        e,
-                        string.as_ref(),
+                    <span class="prelude-val">Err</span>(e) =&gt; FileJsonContent::Unparseable(Box::new(
+                        UnparseableJson::from_jsonc_error(e, string.as_ref()),
                     )),
                 },
                 <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; FileJsonContent::unparseable(<span class="string">&quot;binary is not valid utf-8 text&quot;</span>),

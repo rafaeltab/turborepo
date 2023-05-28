@@ -639,21 +639,11 @@
 <a href="#639" id="639">639</a>
 <a href="#640" id="640">640</a>
 <a href="#641" id="641">641</a>
-<a href="#642" id="642">642</a>
-<a href="#643" id="643">643</a>
-<a href="#644" id="644">644</a>
-<a href="#645" id="645">645</a>
-<a href="#646" id="646">646</a>
-<a href="#647" id="647">647</a>
-<a href="#648" id="648">648</a>
-<a href="#649" id="649">649</a>
-<a href="#650" id="650">650</a>
-<a href="#651" id="651">651</a>
-<a href="#652" id="652">652</a>
-<a href="#653" id="653">653</a>
 </pre><pre class="rust"><code><span class="kw">pub mod </span>availability_info;
 <span class="kw">pub mod </span>available_assets;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>chunking_context;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>containment_tree;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>data;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>evaluate;
 <span class="kw">pub mod </span>optimize;
 
@@ -661,15 +651,17 @@
     collections::HashSet,
     fmt::{Debug, Display},
     future::Future,
+    hash::Hash,
     marker::PhantomData,
 };
 
 <span class="kw">use </span>anyhow::{anyhow, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>serde::{Deserialize, Serialize};
+<span class="kw">use </span>tracing::{info_span, Span};
 <span class="kw">use </span>turbo_tasks::{
     debug::ValueDebugFormat,
     graph::{GraphTraversal, GraphTraversalResult, ReverseTopological, Visit, VisitControlFlow},
-    primitives::{BoolVc, StringVc},
+    primitives::{StringReadRef, StringVc},
     trace::TraceRawVcs,
     TryJoinIterExt, Value, ValueToString, ValueToStringVc,
 };
@@ -679,8 +671,8 @@
 <span class="kw">use </span><span class="self">self</span>::availability_info::AvailabilityInfo;
 <span class="kw">pub use </span><span class="self">self</span>::{
     chunking_context::{ChunkingContext, ChunkingContextVc},
+    data::{ChunkData, ChunkDataOption, ChunkDataOptionVc, ChunkDataVc, ChunksData, ChunksDataVc},
     evaluate::{EvaluatableAsset, EvaluatableAssetVc, EvaluatableAssets, EvaluatableAssetsVc},
-    optimize::optimize,
 };
 <span class="kw">use crate</span>::{
     asset::{Asset, AssetVc, AssetsVc},
@@ -750,13 +742,17 @@
 <span class="attr">#[turbo_tasks::value(transparent)]
 </span><span class="kw">pub struct </span>Chunks(Vec&lt;ChunkVc&gt;);
 
+<span class="attr">#[turbo_tasks::value_impl]
+</span><span class="kw">impl </span>ChunksVc {
+    <span class="doccomment">/// Creates a new empty [ChunksVc].
+    </span><span class="attr">#[turbo_tasks::function]
+    </span><span class="kw">pub fn </span>empty() -&gt; ChunksVc {
+        <span class="self">Self</span>::cell(<span class="macro">vec!</span>[])
+    }
+}
+
 <span class="doccomment">/// A chunk is one type of asset.
 /// It usually contains multiple chunk items.
-/// There is an optional trait [ParallelChunkReference] that
-/// [AssetReference]s from a [Chunk] can implement.
-/// If they implement that and [ParallelChunkReference::is_loaded_in_parallel]
-/// returns true, all referenced assets (if they are [Chunk]s) are placed in the
-/// same chunk group.
 </span><span class="attr">#[turbo_tasks::value_trait]
 </span><span class="kw">pub trait </span>Chunk: Asset {
     <span class="kw">fn </span>chunking_context(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ChunkingContextVc;
@@ -767,12 +763,30 @@
     </span><span class="kw">fn </span>path(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; FileSystemPathVc {
         <span class="self">self</span>.ident().path()
     }
+    <span class="doccomment">/// Returns a list of chunks that should be loaded in parallel to this
+    /// chunk.
+    </span><span class="kw">fn </span>parallel_chunks(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ChunksVc {
+        ChunksVc::empty()
+    }
 }
 
-<span class="doccomment">/// see [Chunk] for explanation
-</span><span class="attr">#[turbo_tasks::value_trait]
-</span><span class="kw">pub trait </span>ParallelChunkReference: AssetReference + ValueToString {
-    <span class="kw">fn </span>is_loaded_in_parallel(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; BoolVc;
+<span class="doccomment">/// Aggregated information about a chunk content that can be used by the runtime
+/// code to optimize chunk loading.
+</span><span class="attr">#[turbo_tasks::value(shared)]
+#[derive(Default)]
+</span><span class="kw">pub struct </span>OutputChunkRuntimeInfo {
+    <span class="kw">pub </span>included_ids: <span class="prelude-ty">Option</span>&lt;ModuleIdsVc&gt;,
+    <span class="kw">pub </span>excluded_ids: <span class="prelude-ty">Option</span>&lt;ModuleIdsVc&gt;,
+    <span class="doccomment">/// List of paths of chunks containing individual modules that are part of
+    /// this chunk. This is useful for selectively loading modules from a chunk
+    /// without loading the whole chunk.
+    </span><span class="kw">pub </span>module_chunks: <span class="prelude-ty">Option</span>&lt;AssetsVc&gt;,
+    <span class="kw">pub </span>placeholder_for_future_extensions: (),
+}
+
+<span class="attr">#[turbo_tasks::value_trait]
+</span><span class="kw">pub trait </span>OutputChunk: Asset {
+    <span class="kw">fn </span>runtime_info(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; OutputChunkRuntimeInfoVc;
 }
 
 <span class="doccomment">/// Specifies how a chunk interacts with other chunks when building a chunk
@@ -816,59 +830,6 @@
 </span><span class="kw">pub trait </span>ChunkableAssetReference: AssetReference + ValueToString {
     <span class="kw">fn </span>chunking_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ChunkingTypeOptionVc {
         ChunkingTypeOptionVc::cell(<span class="prelude-val">Some</span>(ChunkingType::default()))
-    }
-}
-
-<span class="doccomment">/// A reference to a [Chunk]. Can be loaded in parallel, see [Chunk].
-</span><span class="attr">#[turbo_tasks::value]
-</span><span class="kw">pub struct </span>ChunkReference {
-    chunk: ChunkVc,
-    parallel: bool,
-}
-
-<span class="attr">#[turbo_tasks::value_impl]
-</span><span class="kw">impl </span>ChunkReferenceVc {
-    <span class="attr">#[turbo_tasks::function]
-    </span><span class="kw">pub fn </span>new(chunk: ChunkVc) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>::cell(ChunkReference {
-            chunk,
-            parallel: <span class="bool-val">false</span>,
-        })
-    }
-
-    <span class="attr">#[turbo_tasks::function]
-    </span><span class="kw">pub fn </span>new_parallel(chunk: ChunkVc) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>::cell(ChunkReference {
-            chunk,
-            parallel: <span class="bool-val">true</span>,
-        })
-    }
-}
-
-<span class="attr">#[turbo_tasks::value_impl]
-</span><span class="kw">impl </span>AssetReference <span class="kw">for </span>ChunkReference {
-    <span class="attr">#[turbo_tasks::function]
-    </span><span class="kw">fn </span>resolve_reference(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ResolveResultVc {
-        ResolveResult::asset(<span class="self">self</span>.chunk.into()).into()
-    }
-}
-
-<span class="attr">#[turbo_tasks::value_impl]
-</span><span class="kw">impl </span>ValueToString <span class="kw">for </span>ChunkReference {
-    <span class="attr">#[turbo_tasks::function]
-    </span><span class="kw">async fn </span>to_string(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;StringVc&gt; {
-        <span class="prelude-val">Ok</span>(StringVc::cell(<span class="macro">format!</span>(
-            <span class="string">&quot;chunk {}&quot;</span>,
-            <span class="self">self</span>.chunk.ident().to_string().<span class="kw">await</span><span class="question-mark">?
-        </span>)))
-    }
-}
-
-<span class="attr">#[turbo_tasks::value_impl]
-</span><span class="kw">impl </span>ParallelChunkReference <span class="kw">for </span>ChunkReference {
-    <span class="attr">#[turbo_tasks::function]
-    </span><span class="kw">fn </span>is_loaded_in_parallel(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; BoolVc {
-        BoolVc::cell(<span class="self">self</span>.parallel)
     }
 }
 
@@ -964,7 +925,7 @@
 <span class="attr">#[derive(Eq, PartialEq, Clone, Hash)]
 </span><span class="kw">enum </span>ChunkContentGraphNode&lt;I&gt; {
     <span class="comment">// Chunk items that are placed into the current chunk
-    </span>ChunkItem(I),
+    </span>ChunkItem { item: I, ident: StringReadRef },
     <span class="comment">// Asset that is already available and doesn&#39;t need to be included
     </span>AvailableAsset(AssetVc),
     <span class="comment">// Chunks that are loaded in parallel to the current chunk
@@ -1037,7 +998,10 @@
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(chunk_item) = I::from_asset(context.chunking_context, asset).<span class="kw">await</span><span class="question-mark">? </span>{
                     graph_nodes.push((
                         <span class="prelude-val">Some</span>((asset, chunking_type)),
-                        ChunkContentGraphNode::ChunkItem(chunk_item),
+                        ChunkContentGraphNode::ChunkItem {
+                            item: chunk_item,
+                            ident: asset.ident().to_string().<span class="kw">await</span><span class="question-mark">?</span>,
+                        },
                     ));
                 } <span class="kw">else </span>{
                     <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
@@ -1056,12 +1020,7 @@
                 ));
             }
             ChunkingType::IsolatedParallel =&gt; {
-                <span class="kw">let </span>chunk = chunkable_asset.as_chunk(
-                    context.chunking_context,
-                    Value::new(AvailabilityInfo::Root {
-                        current_availability_root: chunkable_asset.into(),
-                    }),
-                );
+                <span class="kw">let </span>chunk = chunkable_asset.as_root_chunk(context.chunking_context);
                 graph_nodes.push((
                     <span class="prelude-val">Some</span>((asset, chunking_type)),
                     ChunkContentGraphNode::Chunk(chunk),
@@ -1080,7 +1039,10 @@
                     </span>{
                         graph_nodes.push((
                             <span class="prelude-val">Some</span>((asset, chunking_type)),
-                            ChunkContentGraphNode::ChunkItem(chunk_item),
+                            ChunkContentGraphNode::ChunkItem {
+                                item: chunk_item,
+                                ident: asset.ident().to_string().<span class="kw">await</span><span class="question-mark">?</span>,
+                            },
                         ));
                         <span class="kw">continue</span>;
                     }
@@ -1112,7 +1074,10 @@
                 </span>{
                     graph_nodes.push((
                         <span class="prelude-val">Some</span>((asset, chunking_type)),
-                        ChunkContentGraphNode::ChunkItem(manifest_loader_item),
+                        ChunkContentGraphNode::ChunkItem {
+                            item: manifest_loader_item,
+                            ident: asset.ident().to_string().<span class="kw">await</span><span class="question-mark">?</span>,
+                        },
                     ));
                 } <span class="kw">else </span>{
                     <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[(
@@ -1164,7 +1129,7 @@
             <span class="kw">return </span>VisitControlFlow::Skip(node);
         }
 
-        <span class="kw">if let </span>ChunkContentGraphNode::ChunkItem(<span class="kw">_</span>) = <span class="kw-2">&amp;</span>node {
+        <span class="kw">if let </span>ChunkContentGraphNode::ChunkItem { .. } = <span class="kw-2">&amp;</span>node {
             <span class="self">self</span>.chunk_items_count += <span class="number">1</span>;
 
             <span class="comment">// Make sure the chunk doesn&#39;t become too large.
@@ -1180,7 +1145,10 @@
     }
 
     <span class="kw">fn </span>edges(<span class="kw-2">&amp;mut </span><span class="self">self</span>, node: <span class="kw-2">&amp;</span>ChunkContentGraphNode&lt;I&gt;) -&gt; <span class="self">Self</span>::EdgesFuture {
-        <span class="kw">let </span>chunk_item = <span class="kw">if let </span>ChunkContentGraphNode::ChunkItem(chunk_item) = node {
+        <span class="kw">let </span>chunk_item = <span class="kw">if let </span>ChunkContentGraphNode::ChunkItem {
+            item: chunk_item, ..
+        } = node
+        {
             <span class="prelude-val">Some</span>(chunk_item.clone())
         } <span class="kw">else </span>{
             <span class="prelude-val">None
@@ -1202,6 +1170,14 @@
                 .<span class="kw">await</span><span class="question-mark">?
                 </span>.into_iter()
                 .flatten())
+        }
+    }
+
+    <span class="kw">fn </span>span(<span class="kw-2">&amp;mut </span><span class="self">self</span>, node: <span class="kw-2">&amp;</span>ChunkContentGraphNode&lt;I&gt;) -&gt; Span {
+        <span class="kw">if let </span>ChunkContentGraphNode::ChunkItem { ident, .. } = node {
+            <span class="macro">info_span!</span>(<span class="string">&quot;module&quot;</span>, name = display(ident))
+        } <span class="kw">else </span>{
+            Span::current()
         }
     }
 }
@@ -1228,9 +1204,10 @@
         .map(|entry| <span class="kw">async move </span>{
             <span class="prelude-val">Ok</span>((
                 <span class="prelude-val">Some</span>((entry, ChunkingType::Placed)),
-                ChunkContentGraphNode::ChunkItem(
-                    I::from_asset(chunking_context, entry).<span class="kw">await</span><span class="question-mark">?</span>.unwrap(),
-                ),
+                ChunkContentGraphNode::ChunkItem {
+                    item: I::from_asset(chunking_context, entry).<span class="kw">await</span><span class="question-mark">?</span>.unwrap(),
+                    ident: entry.ident().to_string().<span class="kw">await</span><span class="question-mark">?</span>,
+                },
             ))
         })
         .try_join()
@@ -1250,10 +1227,9 @@
         _phantom: PhantomData,
     };
 
-    <span class="kw">let </span>GraphTraversalResult::Completed(traversal_result) =
-        GraphTraversal::&lt;ReverseTopological&lt;<span class="kw">_</span>&gt;&gt;::visit(root_edges, visit).<span class="kw">await else </span>{
-            <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
-        };
+    <span class="kw">let </span>GraphTraversalResult::Completed(traversal_result) = ReverseTopological::new().visit(root_edges, visit).<span class="kw">await else </span>{
+        <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+    };
 
     <span class="kw">let </span>graph_nodes: Vec&lt;<span class="kw">_</span>&gt; = traversal_result<span class="question-mark">?</span>.into_iter().collect();
 
@@ -1265,8 +1241,8 @@
     <span class="kw">for </span>graph_node <span class="kw">in </span>graph_nodes {
         <span class="kw">match </span>graph_node {
             ChunkContentGraphNode::AvailableAsset(_asset) =&gt; {}
-            ChunkContentGraphNode::ChunkItem(chunk_item) =&gt; {
-                chunk_items.push(chunk_item);
+            ChunkContentGraphNode::ChunkItem { item, .. } =&gt; {
+                chunk_items.push(item);
             }
             ChunkContentGraphNode::Chunk(chunk) =&gt; {
                 chunks.push(chunk);
